@@ -66,6 +66,7 @@ COPY --from=web-build /src/apps/dashboard/public /opt/runtime/dashboard/apps/das
 COPY --from=web-build /src/apps/status-page/.next/standalone /opt/runtime/status-page
 COPY --from=web-build /src/apps/status-page/.next/static /opt/runtime/status-page/apps/status-page/.next/static
 COPY --from=web-build /src/apps/status-page/public /opt/runtime/status-page/apps/status-page/public
+COPY infra/modal/tb-shim /opt/tb-shim
 COPY infra/modal/supervisor-openstatus.conf /etc/supervisor/conf.d/openstatus.conf
 COPY infra/modal/nginx-openstatus.conf /etc/nginx/conf.d/openstatus.conf
 RUN chmod 0555 /opt/runtime/checker /opt/runtime/private-probe /opt/runtime/private-location /usr/local/bin/sqld && mkdir -p /var/lib/sqld /app/data

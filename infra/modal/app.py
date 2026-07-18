@@ -51,11 +51,13 @@ common_env = {
     "DATABASE_AUTH_TOKEN": "",
     "DB_URL": "http://127.0.0.1:8080",
     "DB_AUTH_TOKEN": "",
-    # Analytics deliberately disabled: empty token → NoopTinybird (TS) and
-    # no-op event clients (Go). libSQL remains the monitoring source of truth.
-    "TINYBIRD_URL": "",
-    "TINY_BIRD_API_KEY": "",
-    "TINYBIRD_TOKEN": "",
+    # Analytics served by the in-container Tinybird-protocol shim (tb-shim on
+    # :7181, backed by the same libSQL). A non-empty token is required so the TS
+    # reader is not NoopTinybird and the Go checker actually sends events; the
+    # value itself is a dummy (the shim ignores the bearer). See infra/modal/tb-shim.
+    "TINYBIRD_URL": "http://127.0.0.1:7181",
+    "TINY_BIRD_API_KEY": "selfhost",
+    "TINYBIRD_TOKEN": "selfhost",
     "WORKFLOWS_URL": "http://127.0.0.1:3000",
     "CHECKER_URL": "http://127.0.0.1:8082",
     "OPENSTATUS_INGEST_URL": "http://127.0.0.1:8081",
@@ -155,7 +157,7 @@ class Gateway:
         self.process = subprocess.Popen(
             ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
         )
-        ports = [8080, 3000, 3001, 8081, 8082, 3002, 3003, 8100]
+        ports = [8080, 7181, 3000, 3001, 8081, 8082, 3002, 3003, 8100]
         if os.environ.get("OPENSTATUS_KEY"):
             ports.append(8083)
         for port in ports:

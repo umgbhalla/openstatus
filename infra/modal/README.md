@@ -7,7 +7,7 @@ Full self-hosted OpenStatus process group runs inside one Modal Server container
 | Service | Internal address | Storage |
 |---|---|---|
 | libSQL | `127.0.0.1:8080` | `openstatus-libsql-v2` |
-| Tinybird Local | `127.0.0.1:7181` | `openstatus-tinybird-clickhouse-v2`, `openstatus-tinybird-redis-v2` |
+| Tinybird shim | `127.0.0.1:7181` | libSQL (`tb_ping`/`tb_audit`/`tb_ondemand_http`) |
 | Workflows | `127.0.0.1:3000` | `openstatus-workflows-v2` |
 | API | `127.0.0.1:3001` | libSQL/Tinybird |
 | Dashboard | `127.0.0.1:3002` | libSQL/Tinybird |
@@ -36,11 +36,14 @@ No database, analytics, checker, or private-location port is publicly exposed.
 Deployment order:
 
 1. Create/update Modal secret `openstatus`.
-2. Start libSQL and Tinybird against persistent Volumes.
+2. Start libSQL against its persistent Volume.
 3. Apply database migrations.
-4. Deploy Tinybird resources.
-5. Persist Tinybird workspace token inside Tinybird Volume.
-6. Deploy `openstatus` Modal Server and scheduled checker dispatcher.
+4. Deploy `openstatus` Modal Server and scheduled checker dispatcher.
+
+Analytics (uptime, latency percentiles, response logs, tracker, audit log) are
+served by the in-container `tb-shim` (Deno, `:7181`) which speaks the Tinybird
+HTTP API and stores rows in the same libSQL. No ClickHouse/Tinybird/Redis. See
+`infra/modal/tb-shim/`.
 
 Default URL:
 
