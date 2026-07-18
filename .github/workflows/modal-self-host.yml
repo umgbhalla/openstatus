@@ -1,0 +1,78 @@
+name: Modal self-host
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy to Modal after verification
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: openstatus-modal
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.2.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.2"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec oxfmt --check apps packages
+      - run: pnpm --filter @openstatus/status-page test
+      - run: pnpm --filter @openstatus/workflows check
+      - run: pnpm --filter @openstatus/dashboard tsc
+      - run: go test ./...
+        working-directory: apps/checker
+        env:
+          TINYBIRD_URL: ""
+      - run: go test ./...
+        working-directory: apps/private-location
+      - run: docker build --platform linux/amd64 -f Dockerfile.modal -t openstatus-modal:${{ github.sha }} .
+
+  deploy:
+    if: inputs.deploy
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: modal-production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install modal==1.5.2
+      - name: Write Modal secret source
+        env:
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          SUPER_ADMIN_TOKEN: ${{ secrets.SUPER_ADMIN_TOKEN }}
+          AUTH_GITHUB_ID: ${{ secrets.AUTH_GITHUB_ID }}
+          AUTH_GITHUB_SECRET: ${{ secrets.AUTH_GITHUB_SECRET }}
+        run: |
+          umask 077
+          {
+            printf 'AUTH_SECRET=%s\n' "$AUTH_SECRET"
+            printf 'CRON_SECRET=%s\n' "$CRON_SECRET"
+            printf 'RESEND_API_KEY=%s\n' "$RESEND_API_KEY"
+            printf 'SUPER_ADMIN_TOKEN=%s\n' "$SUPER_ADMIN_TOKEN"
+            printf 'AUTH_GITHUB_ID=%s\n' "$AUTH_GITHUB_ID"
+            printf 'AUTH_GITHUB_SECRET=%s\n' "$AUTH_GITHUB_SECRET"
+          } > infra/modal/.env.modal
+      - run: ./infra/modal/deploy.sh
+        env:
+          MODAL_BIN: modal
+          MODAL_CLIENT: ""
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}

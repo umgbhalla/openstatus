@@ -11,6 +11,8 @@ export const env = () =>
       GCP_LOCATION: z.string().prefault("europe-west1"),
       CRON_SECRET: z.string().prefault(""),
       SITE_URL: z.string().prefault("http://localhost:3000"),
+      CHECKER_URL: z.string().url(),
+      WORKFLOWS_URL: z.string().url(),
       DATABASE_URL: z.string().prefault("http://localhost:8080"),
       DATABASE_AUTH_TOKEN: z.string().prefault(""),
       RESEND_API_KEY: z.string().prefault(""),

@@ -33,6 +33,24 @@ func main() {
 		<-sigChan
 		cancel()
 	}()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	healthServer := &http.Server{
+		Addr:              ":" + getEnv("PORT", "8080"),
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		if err := healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Fprintf(os.Stderr, "health server failed: %s\n", err)
+			cancel()
+		}
+	}()
+	defer healthServer.Shutdown(context.Background())
+
 	fmt.Println("Launching openstatus private location checker")
 	s := tasks.New()
 	defer s.Stop()
@@ -67,7 +85,10 @@ func getEnv(key, fallback string) string {
 }
 
 func getClient(apiKey string) v1.PrivateLocationServiceClient {
-	ingestUrl := getEnv("OPENSTATUS_INGEST_URL", "https://openstatus-private-location.fly.dev")
+	ingestUrl := getEnv("OPENSTATUS_INGEST_URL", "")
+	if ingestUrl == "" {
+		panic("OPENSTATUS_INGEST_URL is required")
+	}
 
 	client := v1.NewPrivateLocationServiceClient(
 		http.DefaultClient,

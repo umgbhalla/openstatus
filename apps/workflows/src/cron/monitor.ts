@@ -370,7 +370,7 @@ async function CreateTask({
   userId: number;
   initialRun: number;
 }) {
-  const url = `https://openstatus-workflows.fly.dev/cron/monitors/${step}?userId=${userId}&initialRun=${initialRun}`;
+  const url = `${env().WORKFLOWS_URL}/cron/monitors/${step}?userId=${userId}&initialRun=${initialRun}`;
   const timestamp = getScheduledTime(step);
   const taskName = `${parent}/tasks/workflow-${userId}-${step}-${initialRun}`;
   const newTask: google.cloud.tasks.v2beta3.ITask = {

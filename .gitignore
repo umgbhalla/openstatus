@@ -70,6 +70,7 @@ apps/ingest-worker/.dev.vars
 apps/alerting-engine/tmp/
 
 .env.docker
+infra/modal/.env.modal
 
 # UI Registry build output
 apps/web/public/r

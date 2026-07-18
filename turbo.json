@@ -27,7 +27,14 @@
         "NEXT_PUBLIC_OPENPANEL_CLIENT_ID",
         "AUTH_SECRET",
         "CRON_SECRET",
-        "SELF_HOST"
+        "SELF_HOST",
+        "CHECKER_URL",
+        "WORKFLOWS_URL",
+        "STATUS_PAGE_BASE_URL",
+        "STATUS_PAGE_BASE_PATH",
+        "SELF_HOST_REGION",
+        "OPENSTATUS_INGEST_URL",
+        "NEXT_PUBLIC_URL"
       ],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
     },

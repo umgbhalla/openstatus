@@ -3,11 +3,11 @@ import { getLogger } from "@logtape/logtape";
 import { env } from "./env";
 import { app } from "./index";
 
-const port = 3000;
+const { NODE_ENV, PORT } = env;
 
 getLogger("api-server").info("Starting server", {
-  port,
-  environment: env.NODE_ENV,
+  port: PORT,
+  environment: NODE_ENV,
 });
 
-Deno.serve({ port }, app.fetch);
+Deno.serve({ port: PORT }, app.fetch);

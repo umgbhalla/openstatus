@@ -38,6 +38,7 @@ const withNextIntl = createNextIntlPlugin({
 
 const nextConfig: NextConfig = {
   output: process.env.SELF_HOST === "true" ? "standalone" : undefined,
+  basePath: process.env.STATUS_PAGE_BASE_PATH || undefined,
   experimental: {
     authInterrupts: true,
   },

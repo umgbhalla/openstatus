@@ -25,8 +25,12 @@ export const getValidSubdomain = (host?: string | null) => {
     return match?.[1] || null;
   }
 
-  // we should improve here for custom vercel deploy page
-  if (host?.includes(".") && !host.includes(".vercel.app")) {
+  // Managed deployment hosts use path-based page routing.
+  if (
+    host?.includes(".") &&
+    !host.includes(".vercel.app") &&
+    !host.includes(".modal.run")
+  ) {
     const candidate = host.split(".")[0];
     if (candidate && !candidate.includes("www")) {
       // Valid candidate
@@ -40,7 +44,8 @@ export const getValidSubdomain = (host?: string | null) => {
     !(
       host?.includes("stpg.dev") ||
       host?.includes("openstatus.dev") ||
-      host?.endsWith(".vercel.app")
+      host?.endsWith(".vercel.app") ||
+      host?.endsWith(".modal.run")
     )
   ) {
     subdomain = host;
@@ -71,7 +76,8 @@ export const getValidCustomDomain = (req: NextRequest | Request) => {
   if (
     hostnames.length > 2 &&
     hostnames[0] !== "www" &&
-    !url.host.endsWith(".vercel.app")
+    !url.host.endsWith(".vercel.app") &&
+    !url.host.endsWith(".modal.run")
   ) {
     prefix = hostnames[0].toLowerCase();
     type = "hostname";

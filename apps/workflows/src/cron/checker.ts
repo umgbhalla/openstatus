@@ -1,5 +1,3 @@
-import { CloudTasksClient } from "@google-cloud/tasks";
-import type { google } from "@google-cloud/tasks/build/protos";
 import { getLogger } from "@logtape/logtape";
 import {
   and,
@@ -50,24 +48,9 @@ export const isAuthorizedDomain = (url: string) => {
 
 const logger = getLogger("workflow");
 
-const client = new CloudTasksClient({
-  // fallback: true,
-  projectId: env().GCP_PROJECT_ID,
-  credentials: {
-    client_email: env().GCP_CLIENT_EMAIL,
-    private_key: env().GCP_PRIVATE_KEY.replaceAll("\\n", "\n"),
-  },
-});
-
 export async function sendCheckerTasks(
   periodicity: z.infer<typeof monitorPeriodicitySchema>,
 ): Promise<{ success: number; failed: number }> {
-  const parent = client.queuePath(
-    env().GCP_PROJECT_ID,
-    env().GCP_LOCATION,
-    periodicity,
-  );
-
   const timestamp = Date.now();
 
   const currentMaintenance = db
@@ -183,7 +166,7 @@ export async function sendCheckerTasks(
       taskInputs,
       (input) =>
         Effect.tryPromise({
-          try: () => createCronTask(input, parent),
+          try: () => createCronTask(input),
           catch: (err) => {
             if (err instanceof Error && "code" in err && err.code === 6) {
               return "ALREADY_EXISTS" as const;
@@ -236,10 +219,12 @@ export async function sendCheckerTasks(
   return { success, failed };
 }
 // timestamp needs to be in ms
-const createCronTask = async (
-  { row, timestamp, status, region }: TaskInput,
-  parent: string,
-) => {
+const createCronTask = async ({
+  row,
+  timestamp,
+  status,
+  region,
+}: TaskInput) => {
   let payload:
     | z.infer<typeof httpPayloadSchema>
     | z.infer<typeof tpcPayloadSchema>
@@ -316,57 +301,23 @@ const createCronTask = async (
   if (!payload) {
     throw new Error("Invalid jobType");
   }
-  const regionInfo = regionDict[region];
-  let regionHeader = {};
-  if (regionInfo.provider === "fly") {
-    regionHeader = { "fly-prefer-region": region };
+  const delay = timestamp - Date.now();
+  if (delay > 0) {
+    await new Promise((resolve) => setTimeout(resolve, delay));
   }
-  if (regionInfo.provider === "koyeb") {
-    regionHeader = { "X-KOYEB-REGION-OVERRIDE": region.replace("koyeb_", "") };
-  }
-  if (regionInfo.provider === "railway") {
-    regionHeader = { "railway-region": region.replace("railway_", "") };
-  }
-  const taskName = `${parent}/tasks/monitor-${row.id}-${region}-${timestamp}`;
-  const newTask: google.cloud.tasks.v2beta3.ITask = {
-    name: taskName,
-    httpRequest: {
+  const response = await fetch(
+    `${env().CHECKER_URL}/checker/${row.jobType}?monitor_id=${row.id}`,
+    {
+      method: "POST",
       headers: {
-        "Content-Type": "application/json", // Set content type to ensure compatibility your application's request parsing
-        ...regionHeader,
         Authorization: `Basic ${env().CRON_SECRET}`,
+        "Content-Type": "application/json",
+        "fly-prefer-region": region,
       },
-      httpMethod: "POST",
-      url: generateUrl({ row, region }),
-      body: Buffer.from(JSON.stringify(payload)).toString("base64"),
+      body: JSON.stringify(payload),
     },
-    scheduleTime: {
-      seconds: timestamp / 1000,
-    },
-  };
-
-  const request = { parent: parent, task: newTask };
-  return client.createTask(request);
-};
-
-function generateUrl({
-  row,
-  region,
-}: {
-  row: z.infer<typeof selectMonitorSchema>;
-  region: Region;
-}) {
-  const regionInfo = regionDict[region];
-
-  switch (regionInfo.provider) {
-    case "fly":
-      return `https://openstatus-checker.fly.dev/checker/${row.jobType}?monitor_id=${row.id}`;
-    case "koyeb":
-      return `https://openstatus-checker.koyeb.app/checker/${row.jobType}?monitor_id=${row.id}`;
-    case "railway":
-      return `https://railway-proxy-production-9cb1.up.railway.app/checker/${row.jobType}?monitor_id=${row.id}`;
-
-    default:
-      throw new Error("Invalid jobType");
+  );
+  if (!response.ok) {
+    throw new Error(`Checker returned ${response.status}`);
   }
-}
+};

@@ -42,7 +42,8 @@ export function resolveRoute({
   if (
     hostnames.length > 2 &&
     hostnames[0] !== "www" &&
-    !urlHost.endsWith(".vercel.app")
+    !urlHost.endsWith(".vercel.app") &&
+    !urlHost.endsWith(".modal.run")
   ) {
     prefix = hostnames[0].toLowerCase();
     type = "hostname";

@@ -66,11 +66,12 @@ export function registerHTTPPostCheck(api: typeof checkApi) {
       .get();
 
     const result = [];
+    const checkerUrl = env.CHECKER_URL;
 
     for (let count = 0; count < input.runCount; count++) {
       const currentFetch = [];
       for (const region of input.regions) {
-        const r = fetch(`https://openstatus-checker.fly.dev/ping/${region}`, {
+        const r = fetch(`${checkerUrl}/ping/${region}`, {
           headers: {
             Authorization: `Basic ${env.CRON_SECRET}`,
             "Content-Type": "application/json",

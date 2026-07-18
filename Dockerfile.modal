@@ -1,0 +1,73 @@
+# syntax=docker/dockerfile:1.19.0
+
+FROM node:24-slim AS web-build
+ENV \
+    PNPM_HOME=/pnpm \
+    PATH=/pnpm:$PATH \
+    SELF_HOST=true \
+    STATUS_PAGE_BASE_PATH=/status \
+    NODE_ENV=production \
+    DATABASE_URL=http://127.0.0.1:8080 \
+    DATABASE_AUTH_TOKEN=test \
+    CRON_SECRET=test \
+    CHECKER_URL=http://127.0.0.1:8082 \
+    WORKFLOWS_URL=http://127.0.0.1:3000 \
+    STATUS_PAGE_BASE_URL=http://localhost:8000/status \
+    TINY_BIRD_API_KEY=test \
+    RESEND_API_KEY=test \
+    AUTH_SECRET=build-time-placeholder-min-32-characters \
+    NEXT_PUBLIC_URL=http://localhost:8000 \
+    UPSTASH_REDIS_REST_URL=https://test.upstash.io \
+    UPSTASH_REDIS_REST_TOKEN=test \
+    UNKEY_API_ID=test \
+    UNKEY_TOKEN=test \
+    STRIPE_SECRET_KEY=test \
+    PROJECT_ID_VERCEL=test \
+    TEAM_ID_VERCEL=test \
+    VERCEL_AUTH_BEARER_TOKEN=test \
+    NEXT_PUBLIC_OPENPANEL_CLIENT_ID=test \
+    OPENPANEL_CLIENT_SECRET=test
+WORKDIR /src
+COPY . .
+RUN corepack enable && pnpm install --frozen-lockfile
+RUN pnpm turbo run build --filter=@openstatus/dashboard --filter=@openstatus/status-page
+
+FROM golang:1.25-alpine AS checker-build
+WORKDIR /src
+COPY apps/checker ./apps/checker
+WORKDIR /src/apps/checker
+RUN apk add --no-cache ca-certificates tzdata && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/checker ./cmd/server && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/private-probe ./cmd/private
+
+FROM golang:1.25-alpine AS private-location-build
+WORKDIR /src/apps/private-location
+COPY apps/private-location .
+RUN apk add --no-cache ca-certificates tzdata && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/private-location ./cmd/server
+
+FROM denoland/deno:2.9.2 AS deno
+FROM node:24-slim AS node
+FROM ghcr.io/tursodatabase/libsql-server:latest AS libsql
+FROM tinybirdco/tinybird-local:latest
+
+USER root
+COPY --from=node /usr/local/ /usr/local/
+COPY --from=deno /usr/bin/deno /usr/local/bin/deno
+COPY --from=libsql /bin/sqld /usr/local/bin/sqld
+COPY --from=checker-build /out/checker /opt/runtime/checker
+COPY --from=checker-build /out/private-probe /opt/runtime/private-probe
+COPY --from=private-location-build /out/private-location /opt/runtime/private-location
+COPY --from=web-build /src /opt/openstatus
+# Standalone output is monorepo-rooted: copy the WHOLE tree so the traced
+# node_modules + workspace packages siblings ride along with server.js.
+COPY --from=web-build /src/apps/dashboard/.next/standalone /opt/runtime/dashboard
+COPY --from=web-build /src/apps/dashboard/.next/static /opt/runtime/dashboard/apps/dashboard/.next/static
+COPY --from=web-build /src/apps/dashboard/public /opt/runtime/dashboard/apps/dashboard/public
+COPY --from=web-build /src/apps/status-page/.next/standalone /opt/runtime/status-page
+COPY --from=web-build /src/apps/status-page/.next/static /opt/runtime/status-page/apps/status-page/.next/static
+COPY --from=web-build /src/apps/status-page/public /opt/runtime/status-page/apps/status-page/public
+COPY infra/modal/supervisor-openstatus.conf /etc/supervisor/conf.d/openstatus.conf
+COPY infra/modal/nginx-openstatus.conf /etc/nginx/conf.d/openstatus.conf
+RUN chmod 0555 /opt/runtime/checker /opt/runtime/private-probe /opt/runtime/private-location /usr/local/bin/sqld
+
+# 8100: tinybird base internally owns 8000 (tokens service) — do not collide.
+EXPOSE 8100
+CMD ["/usr/bin/supervisord"]

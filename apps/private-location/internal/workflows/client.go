@@ -10,10 +10,11 @@ import (
 )
 
 func getBaseURL() string {
-	if url := os.Getenv("WORKFLOWS_URL"); url != "" {
-		return url
+	url := os.Getenv("WORKFLOWS_URL")
+	if url == "" {
+		panic("WORKFLOWS_URL is required")
 	}
-	return "https://openstatus-workflows.fly.dev"
+	return url
 }
 
 type Payload struct {

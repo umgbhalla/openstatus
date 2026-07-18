@@ -364,6 +364,23 @@ describe("resolveRoute", () => {
     });
   });
 
+  describe("Modal routing", () => {
+    test("modal.run host uses pathname slug", () => {
+      const result = resolveRoute({
+        host: "umgbhalla--openstatus-gateway.modal.run",
+        urlHost: "umgbhalla--openstatus-gateway.modal.run",
+        pathname: "/acme",
+      });
+      expect(result).toEqual({
+        type: "pathname",
+        prefix: "acme",
+        locale: "en",
+        localeExplicit: false,
+        rewritePath: "/acme/en",
+      });
+    });
+  });
+
   describe("edge cases", () => {
     test("root path on localhost returns null (no page)", () => {
       const result = resolveRoute({

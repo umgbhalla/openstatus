@@ -11,12 +11,16 @@ export function getLimit<T extends keyof Limits>(limits: Limits, limit: T) {
   return limits[limit] || allPlans.free.limits[limit];
 }
 
+// Self-host has no billing: every workspace resolves to the top tier.
+const selfHostPlan = (plan: WorkspacePlan | null): WorkspacePlan =>
+  process.env.SELF_HOST === "true" ? "scale" : plan || "free";
+
 export function getLimits(plan: WorkspacePlan | null) {
-  return allPlans[plan || "free"].limits;
+  return allPlans[selfHostPlan(plan)].limits;
 }
 
 export function getPlanConfig(plan: WorkspacePlan | null) {
-  return allPlans[plan || "free"];
+  return allPlans[selfHostPlan(plan)];
 }
 
 export function getCurrency({

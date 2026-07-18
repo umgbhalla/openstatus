@@ -6,6 +6,7 @@ import {
   transformHeaders,
 } from "@openstatus/utils";
 
+import { env } from "@/env";
 import { OpenStatusApiError } from "@/libs/errors";
 
 export function getCheckerPayload(
@@ -73,11 +74,12 @@ export function getCheckerUrl(
     data: false,
   },
 ): string {
+  const checkerUrl = env.CHECKER_URL;
   switch (monitor.jobType) {
     case "http":
-      return `https://openstatus-checker.fly.dev/checker/http?monitor_id=${monitor.id}&trigger=${opts.trigger}&data=${opts.data}`;
+      return `${checkerUrl}/checker/http?monitor_id=${monitor.id}&trigger=${opts.trigger}&data=${opts.data}`;
     case "tcp":
-      return `https://openstatus-checker.fly.dev/checker/tcp?monitor_id=${monitor.id}&trigger=${opts.trigger}&data=${opts.data}`;
+      return `${checkerUrl}/checker/tcp?monitor_id=${monitor.id}&trigger=${opts.trigger}&data=${opts.data}`;
     default:
       throw new OpenStatusApiError({
         code: "BAD_REQUEST",

@@ -14,11 +14,6 @@ export type StreamMonitorPreviewInput = z.infer<
   typeof StreamMonitorPreviewInput
 >;
 
-const FLY_CHECKER_URL = "https://openstatus-checker.fly.dev/ping";
-const KOYEB_CHECKER_URL = "https://openstatus-checker.koyeb.app/ping";
-const RAILWAY_CHECKER_URL =
-  "https://railway-proxy-production-9cb1.up.railway.app/ping";
-
 const REGION_TIMEOUT_MS = 10_000;
 
 export type CheckResultSuccess = {
@@ -58,31 +53,14 @@ function getCheckerEndpoint(region: Region): {
   endpoint: string;
   regionHeader: Record<string, string>;
 } {
-  const provider = regionDict[region]?.provider ?? "fly";
-  switch (provider) {
-    case "fly":
-      return {
-        endpoint: `${FLY_CHECKER_URL}/${region}`,
-        regionHeader: { "fly-prefer-region": region },
-      };
-    case "koyeb":
-      return {
-        endpoint: `${KOYEB_CHECKER_URL}/${region}`,
-        regionHeader: {
-          "X-KOYEB-REGION-OVERRIDE": region.replace("koyeb_", ""),
-        },
-      };
-    case "railway":
-      return {
-        endpoint: `${RAILWAY_CHECKER_URL}/${region}`,
-        regionHeader: { "railway-region": region.replace("railway_", "") },
-      };
-    default:
-      return {
-        endpoint: `${FLY_CHECKER_URL}/${region}`,
-        regionHeader: {},
-      };
+  const checkerUrl = process.env.CHECKER_URL;
+  if (!checkerUrl) {
+    throw new InternalServiceError("CHECKER_URL is required");
   }
+  return {
+    endpoint: `${checkerUrl}/ping/${region}`,
+    regionHeader: { "fly-prefer-region": region },
+  };
 }
 
 async function probeRegion(args: {
@@ -199,12 +177,10 @@ export async function* streamMonitorPreview(args: {
     throw new InternalServiceError("CRON_SECRET is not set");
   }
 
-  // Skip deprecated regions — fly (and other providers) no longer run
-  // machines there, so probes time out and produce noise rows. Mirrors
-  // the existing `pickDefaultRegions` filter in `internal.ts`.
-  const activeRegions = ALL_REGIONS.filter(
-    (region) => !regionDict[region].deprecated,
-  );
+  const selfHostRegion = process.env.SELF_HOST_REGION as Region | undefined;
+  const activeRegions = selfHostRegion
+    ? [selfHostRegion]
+    : ALL_REGIONS.filter((region) => !regionDict[region].deprecated);
 
   const promises: Promise<CheckResult>[] = activeRegions.map((region) =>
     probeRegion({
