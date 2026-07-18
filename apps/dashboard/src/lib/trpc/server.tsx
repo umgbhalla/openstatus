@@ -8,8 +8,8 @@ import {
   type TRPCQueryOptions,
   createTRPCOptionsProxy,
 } from "@trpc/tanstack-react-query";
-import { cookies } from "next/headers";
-import { notFound } from "next/navigation";
+import { cookies, headers } from "next/headers";
+import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 
 import { makeQueryClient } from "./query-client";
@@ -31,17 +31,33 @@ export const trpc = createTRPCOptionsProxy<AppRouter>({
         // `typeof fetch` carries a `preconnect` static (React 19 typings) that
         // tRPC's link will never invoke — cast the call-signature wrapper.
         fetch: (async (url, options) => {
-          const cookieStore = await cookies();
-          console.log("[dashboard trpc server] fetch", {
-            hasSessionToken:
-              !!cookieStore.get("__Secure-authjs.session-token")?.value ||
-              !!cookieStore.get("authjs.session-token")?.value,
-          });
+          const [cookieStore, headerStore] = await Promise.all([
+            cookies(),
+            headers(),
+          ]);
+          // The RSC self-call hits http://127.0.0.1:<PORT>/api/trpc/lambda
+          // DIRECTLY, bypassing the reverse proxy. Without the proxy's
+          // X-Forwarded-* headers, Auth.js (trustHost) reconstructs a plain
+          // http:// origin, disables secure cookies, and then looks for the
+          // unprefixed `authjs.session-token` — missing the forwarded
+          // `__Secure-authjs.session-token` cookie and throwing UNAUTHORIZED.
+          // Forward the proxy's forwarding headers so the loopback target
+          // re-derives the same https origin the browser request had. On the
+          // hosted path these are already https, so this is a no-op there.
+          const forwarded: Record<string, string> = {};
+          const proto = headerStore.get("x-forwarded-proto");
+          const host =
+            headerStore.get("x-forwarded-host") ?? headerStore.get("host");
+          const forwardedFor = headerStore.get("x-forwarded-for");
+          if (proto) forwarded["x-forwarded-proto"] = proto;
+          if (host) forwarded["x-forwarded-host"] = host;
+          if (forwardedFor) forwarded["x-forwarded-for"] = forwardedFor;
           return fetch(url, {
             ...options,
             credentials: "include",
             headers: {
               ...options?.headers,
+              ...forwarded,
               cookie: cookieStore.toString(),
             },
           });
@@ -104,8 +120,20 @@ export async function fetchQueryOrNotFound<
       ReturnType<Extract<T["queryFn"], (...args: never[]) => unknown>>
     >;
   } catch (error) {
-    if (error instanceof TRPCClientError && error.data?.code === "NOT_FOUND") {
-      notFound();
+    if (error instanceof TRPCClientError) {
+      const code = error.data?.code;
+      if (code === "NOT_FOUND") {
+        notFound();
+      }
+      // A blocking detail-page fetch that comes back UNAUTHORIZED/FORBIDDEN
+      // means the session could not be resolved for this request (e.g. the
+      // loopback self-call lost auth). Sending the user to /login is a far
+      // better UX than an uncaught RSC render error (HTTP 500), and it never
+      // masks a genuine data problem — those surface as other error codes and
+      // still bubble.
+      if (code === "UNAUTHORIZED" || code === "FORBIDDEN") {
+        redirect("/login");
+      }
     }
     throw error;
   }
