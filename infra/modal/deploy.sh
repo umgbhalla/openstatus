@@ -49,6 +49,21 @@ modal() {
 cd "$ROOT"
 modal secret create openstatus --from-dotenv "$ENV_FILE" --force
 # Single-writer fence: never let a live Gateway share the Volumes with bootstrap.
-modal app stop openstatus --env "$MODAL_ENVIRONMENT" 2>/dev/null || true
+modal app stop openstatus --env "$MODAL_ENVIRONMENT" -y 2>/dev/null || true
 modal run --detach --env "$MODAL_ENVIRONMENT" infra/modal/app.py::bootstrap
 modal deploy --env "$MODAL_ENVIRONMENT" infra/modal/app.py::app
+
+# The Server URL is only known post-deploy; pin it and redeploy so NEXT_PUBLIC_URL/
+# SITE_URL/STATUS_PAGE_BASE_URL and the cron dispatcher all carry the real origin.
+MODAL_PYTHON="${MODAL_PYTHON:-$HOME/hub/harp/.venv/bin/python}"
+GATEWAY_URL="$(MODAL_ENVIRONMENT="$MODAL_ENVIRONMENT" \
+  PYTHONPATH="${MODAL_CLIENT:+$MODAL_CLIENT:}${PYTHONPATH:-}" \
+  "$MODAL_PYTHON" - <<'PY' 2>/dev/null || true
+import modal
+print(modal.Server.from_name("openstatus", "Gateway").get_url() or "")
+PY
+)"
+if [ -n "$GATEWAY_URL" ] && [ "$GATEWAY_URL" != "${OPENSTATUS_PUBLIC_URL:-}" ]; then
+  printf 'gateway URL: %s — redeploying with pinned public URL\n' "$GATEWAY_URL"
+  OPENSTATUS_PUBLIC_URL="$GATEWAY_URL" modal deploy --env "$MODAL_ENVIRONMENT" infra/modal/app.py::app
+fi

@@ -45,6 +45,10 @@ func NewClient(httpClient *http.Client, apiKey string) Client {
 }
 
 func (c client) SendEvent(ctx context.Context, event any, dataSourceName string) error {
+	// Self-host without analytics: empty token → drop events silently.
+	if c.apiKey == "" {
+		return nil
+	}
 	requestURL, err := url.Parse(c.baseURL)
 	if err != nil {
 		return fmt.Errorf("unable to parse url: %w", err)

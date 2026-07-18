@@ -100,3 +100,10 @@ openstatus.db
 **/.contentlayer
 **/public/build
 **/.svelte-kit
+# Modal deploy plumbing — only the two runtime confs are build inputs
+infra/modal/app.py
+infra/modal/deploy.sh
+infra/modal/README.md
+infra/modal/.env.modal
+infra/modal/__pycache__
+.github

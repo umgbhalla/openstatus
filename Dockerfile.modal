@@ -12,11 +12,11 @@ ENV \
     CRON_SECRET=test \
     CHECKER_URL=http://127.0.0.1:8082 \
     WORKFLOWS_URL=http://127.0.0.1:3000 \
-    STATUS_PAGE_BASE_URL=http://localhost:8000/status \
-    TINY_BIRD_API_KEY=test \
+    STATUS_PAGE_BASE_URL=http://localhost:8100/status \
+    TINY_BIRD_API_KEY= \
     RESEND_API_KEY=test \
     AUTH_SECRET=build-time-placeholder-min-32-characters \
-    NEXT_PUBLIC_URL=http://localhost:8000 \
+    NEXT_PUBLIC_URL=http://localhost:8100 \
     UPSTASH_REDIS_REST_URL=https://test.upstash.io \
     UPSTASH_REDIS_REST_TOKEN=test \
     UNKEY_API_ID=test \
@@ -44,12 +44,14 @@ COPY apps/private-location .
 RUN apk add --no-cache ca-certificates tzdata && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/private-location ./cmd/server
 
 FROM denoland/deno:2.9.2 AS deno
-FROM node:24-slim AS node
 FROM ghcr.io/tursodatabase/libsql-server:latest AS libsql
-FROM tinybirdco/tinybird-local:latest
 
-USER root
-COPY --from=node /usr/local/ /usr/local/
+# Runtime: slim node base — sqld + deno + go binaries + Next standalone + nginx,
+# all supervised in one container. No Tinybird: analytics are a no-op self-hosted.
+FROM node:24-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends nginx supervisor curl ca-certificates && rm -rf /var/lib/apt/lists/* && rm -f /etc/nginx/sites-enabled/default
+
 COPY --from=deno /usr/bin/deno /usr/local/bin/deno
 COPY --from=libsql /bin/sqld /usr/local/bin/sqld
 COPY --from=checker-build /out/checker /opt/runtime/checker
@@ -66,8 +68,7 @@ COPY --from=web-build /src/apps/status-page/.next/static /opt/runtime/status-pag
 COPY --from=web-build /src/apps/status-page/public /opt/runtime/status-page/apps/status-page/public
 COPY infra/modal/supervisor-openstatus.conf /etc/supervisor/conf.d/openstatus.conf
 COPY infra/modal/nginx-openstatus.conf /etc/nginx/conf.d/openstatus.conf
-RUN chmod 0555 /opt/runtime/checker /opt/runtime/private-probe /opt/runtime/private-location /usr/local/bin/sqld
+RUN chmod 0555 /opt/runtime/checker /opt/runtime/private-probe /opt/runtime/private-location /usr/local/bin/sqld && mkdir -p /var/lib/sqld /app/data
 
-# 8100: tinybird base internally owns 8000 (tokens service) — do not collide.
 EXPOSE 8100
-CMD ["/usr/bin/supervisord"]
+CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]

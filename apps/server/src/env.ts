@@ -4,11 +4,12 @@ import { z } from "zod";
 
 export const env = createEnv({
   server: {
-    UNKEY_API_ID: z.string().min(1),
-    UNKEY_TOKEN: z.string().min(1),
-    TINY_BIRD_API_KEY: z.string().min(1),
-    UPSTASH_REDIS_REST_URL: z.string().min(1),
-    UPSTASH_REDIS_REST_TOKEN: z.string().min(1),
+    // Self-host: these SaaS integrations are optional — empty disables them.
+    UNKEY_API_ID: z.string().prefault(""),
+    UNKEY_TOKEN: z.string().prefault(""),
+    TINY_BIRD_API_KEY: z.string().prefault(""),
+    UPSTASH_REDIS_REST_URL: z.string().prefault(""),
+    UPSTASH_REDIS_REST_TOKEN: z.string().prefault(""),
     FLY_REGION: z.enum(monitorRegions),
     CRON_SECRET: z.string(),
     CHECKER_URL: z.string().url(),

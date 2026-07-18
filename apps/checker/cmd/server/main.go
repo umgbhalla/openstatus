@@ -229,9 +229,17 @@ func main() {
 
 	tinybirdClient := tinybird.NewClient(httpClient, tinyBirdToken)
 
+	// Self-host runs one checker for every region label: neutralize the
+	// handlers' fly-replay short-circuit (it only fires when CloudProvider
+	// is exactly "fly") so each check executes locally.
+	handlerProvider := cloudProvider
+	if env("SELF_HOST", "") == "true" {
+		handlerProvider = "self-host"
+	}
+
 	h := &handlers.Handler{
 		Secret:        cronSecret,
-		CloudProvider: cloudProvider,
+		CloudProvider: handlerProvider,
 		Region:        region,
 		TbClient:      tinybirdClient,
 	}

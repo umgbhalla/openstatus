@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import socket
 import subprocess
@@ -18,7 +17,6 @@ PUBLIC_URL = os.environ.get(
     "OPENSTATUS_PUBLIC_URL", "https://umgbhalla--openstatus-gateway.modal.run"
 ).rstrip("/")
 REGION = os.environ.get("OPENSTATUS_MODAL_REGION", "us-west-2")
-TOKEN_FILE = Path("/var/lib/clickhouse/.openstatus-workspace-token")
 
 app = modal.App(APP_NAME)
 bootstrap_app = modal.App(f"{APP_NAME}-bootstrap")
@@ -32,20 +30,12 @@ cron_image = modal.Image.debian_slim(python_version="3.13")
 libsql_volume = modal.Volume.from_name(
     "openstatus-libsql-v2", create_if_missing=True, version=2
 )
-tinybird_clickhouse_volume = modal.Volume.from_name(
-    "openstatus-tinybird-clickhouse-v2", create_if_missing=True, version=2
-)
-tinybird_redis_volume = modal.Volume.from_name(
-    "openstatus-tinybird-redis-v2", create_if_missing=True, version=2
-)
 workflows_volume = modal.Volume.from_name(
     "openstatus-workflows-v2", create_if_missing=True, version=2
 )
 
 volumes = {
     "/var/lib/sqld": libsql_volume,
-    "/var/lib/clickhouse": tinybird_clickhouse_volume,
-    "/redis-data": tinybird_redis_volume,
     "/app/data": workflows_volume,
 }
 secret = modal.Secret.from_name(
@@ -61,7 +51,11 @@ common_env = {
     "DATABASE_AUTH_TOKEN": "",
     "DB_URL": "http://127.0.0.1:8080",
     "DB_AUTH_TOKEN": "",
-    "TINYBIRD_URL": "http://127.0.0.1:7181",
+    # Analytics deliberately disabled: empty token → NoopTinybird (TS) and
+    # no-op event clients (Go). libSQL remains the monitoring source of truth.
+    "TINYBIRD_URL": "",
+    "TINY_BIRD_API_KEY": "",
+    "TINYBIRD_TOKEN": "",
     "WORKFLOWS_URL": "http://127.0.0.1:3000",
     "CHECKER_URL": "http://127.0.0.1:8082",
     "OPENSTATUS_INGEST_URL": "http://127.0.0.1:8081",
@@ -82,12 +76,12 @@ common_env = {
     "SCREENSHOT_SERVICE_URL": "",
     "UNKEY_API_ID": "",
     "UNKEY_TOKEN": "",
+    "AXIOM_TOKEN": "",
+    "AXIOM_DATASET": "",
     "STRIPE_SECRET_KEY": "",
     "PROJECT_ID_VERCEL": "",
     "TEAM_ID_VERCEL": "",
     "VERCEL_AUTH_BEARER_TOKEN": "",
-    "TINY_BIRD_API_KEY": "bootstrap-pending",
-    "TINYBIRD_TOKEN": "bootstrap-pending",
 }
 
 
@@ -116,62 +110,25 @@ def stop_process(process: subprocess.Popen[bytes]) -> None:
     volumes=volumes,
     secrets=[secret],
     env=common_env,
-    cpu=8,
-    memory=16384,
-    timeout=1800,
+    cpu=4,
+    memory=8192,
+    timeout=900,
     region=REGION,
 )
 def bootstrap() -> dict[str, str]:
-    conf = Path("/etc/supervisor/conf.d/openstatus.conf")
-    disabled = conf.with_suffix(".disabled")
-    if conf.exists():
-        conf.rename(disabled)
-
     sqld = subprocess.Popen(["/usr/local/bin/sqld"], cwd="/var/lib/sqld")
-    supervisor = subprocess.Popen(["/usr/bin/supervisord"])
     try:
         wait_port(8080)
-        wait_port(7181, timeout=300)
-        with urllib.request.urlopen("http://127.0.0.1:7181/tokens", timeout=30) as response:
-            tokens = json.load(response)
-        token = tokens.get("workspace_admin_token") or tokens.get("workspace_token")
-        if not token:
-            raise RuntimeError("Tinybird workspace token missing")
-
-        env = {
-            **os.environ,
-            "DATABASE_URL": common_env["DATABASE_URL"],
-            "DATABASE_AUTH_TOKEN": "",
-            "TB_TOKEN": token,
-            "TINY_BIRD_API_KEY": token,
-            "TINYBIRD_TOKEN": token,
-            "TINYBIRD_URL": common_env["TINYBIRD_URL"],
-        }
         subprocess.run(
             ["/usr/local/bin/deno", "run", "-A", "--sloppy-imports", "src/migrate.mts"],
             cwd="/opt/openstatus/packages/db",
-            env=env,
             check=True,
         )
-        subprocess.run(
-            ["/usr/local/bin/tb", "--local", "deploy"],
-            cwd="/opt/openstatus/packages/tinybird",
-            env=env,
-            check=True,
-        )
-        TOKEN_FILE.write_text(token, encoding="utf-8")
-        TOKEN_FILE.chmod(0o600)
     finally:
-        stop_process(supervisor)
         stop_process(sqld)
-        if disabled.exists():
-            disabled.rename(conf)
-
     libsql_volume.commit()
-    tinybird_clickhouse_volume.commit()
-    tinybird_redis_volume.commit()
     workflows_volume.commit()
-    return {"database": "migrated", "tinybird": "deployed"}
+    return {"database": "migrated"}
 
 
 @app.server(
@@ -182,28 +139,22 @@ def bootstrap() -> dict[str, str]:
     volumes=volumes,
     secrets=[secret],
     env=common_env,
-    cpu=8,
-    memory=16384,
-    ephemeral_disk=20480,
+    cpu=4,
+    memory=8192,
     min_containers=1,
     max_containers=1,
     target_concurrency=100,
-    startup_timeout=300,
+    startup_timeout=600,
     exit_grace_period=120,
     unauthenticated=True,
 )
 class Gateway:
     @modal.enter()
     def start(self) -> None:
-        if not TOKEN_FILE.exists():
-            raise RuntimeError("run bootstrap before deploying Gateway")
-        token = TOKEN_FILE.read_text(encoding="utf-8").strip()
-        if not token:
-            raise RuntimeError("Tinybird workspace token is empty")
-        os.environ["TINY_BIRD_API_KEY"] = token
-        os.environ["TINYBIRD_TOKEN"] = token
-        self.process = subprocess.Popen(["/usr/bin/supervisord"])
-        ports = [8080, 7181, 3000, 3001, 8081, 8082, 3002, 3003, 8100]
+        self.process = subprocess.Popen(
+            ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
+        )
+        ports = [8080, 3000, 3001, 8081, 8082, 3002, 3003, 8100]
         if os.environ.get("OPENSTATUS_KEY"):
             ports.append(8083)
         for port in ports:
@@ -213,8 +164,6 @@ class Gateway:
     def stop(self) -> None:
         stop_process(self.process)
         libsql_volume.commit()
-        tinybird_clickhouse_volume.commit()
-        tinybird_redis_volume.commit()
         workflows_volume.commit()
 
 
@@ -239,6 +188,9 @@ def call_workflow(path: str) -> None:
 )
 def scheduled_checks() -> None:
     minute = int(time.time() // 60)
+    # 30s periodicity: one dispatch per minute — sendCheckerTasks enqueues the
+    # +30s twin itself.
+    call_workflow("/cron/checker/30s")
     call_workflow("/cron/checker/1m")
     if minute % 5 == 0:
         call_workflow("/cron/checker/5m")

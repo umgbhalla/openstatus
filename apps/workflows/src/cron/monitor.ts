@@ -29,24 +29,37 @@ import { env } from "../env";
 
 const redis = Redis.fromEnv();
 
-const client = new CloudTasksClient({
-  projectId: env().GCP_PROJECT_ID,
-  fallback: "rest",
-  credentials: {
-    client_email: env().GCP_CLIENT_EMAIL,
-    private_key: env().GCP_PRIVATE_KEY.replaceAll("\\n", "\n"),
-  },
-});
-
-const parent = client.queuePath(
-  env().GCP_PROJECT_ID,
-  env().GCP_LOCATION,
-  "workflow",
-);
+// GCP client construction at import time hangs without real credentials —
+// build it lazily, and only when the paid-account nag workflow is in use.
+const selfHost = () => process.env.SELF_HOST === "true";
+let _client: CloudTasksClient | null = null;
+let _parent: string | null = null;
+function gcp() {
+  if (!_client) {
+    _client = new CloudTasksClient({
+      projectId: env().GCP_PROJECT_ID,
+      fallback: "rest",
+      credentials: {
+        client_email: env().GCP_CLIENT_EMAIL,
+        private_key: env().GCP_PRIVATE_KEY.replaceAll("\\n", "\n"),
+      },
+    });
+    _parent = _client.queuePath(
+      env().GCP_PROJECT_ID,
+      env().GCP_LOCATION,
+      "workflow",
+    );
+  }
+  return { client: _client, parent: _parent as string };
+}
 
 const limiter = new RateLimiter({ tokensPerInterval: 15, interval: "second" });
 
 export async function LaunchMonitorWorkflow() {
+  // Self-host has no billing: the free-tier pause/nag workflow is meaningless.
+  if (selfHost()) {
+    return;
+  }
   // Expires is one month after last connection, so if we want to reach people who connected 3 months ago we need to check for people with  expires 2 months ago
   const twoMonthAgo = new Date().setMonth(new Date().getMonth() - 2);
 
@@ -185,8 +198,6 @@ async function workflowInit({
   }
   const initialRun = new Date().getTime();
   await CreateTask({
-    parent,
-    client: client,
     step: "14days",
     userId: user.userId,
     initialRun,
@@ -230,8 +241,6 @@ export async function Step14Days(userId: number, workFlowRunTimestamp: number) {
   }
 
   await CreateTask({
-    parent,
-    client: client,
     step: "3days",
     userId: user.id,
     initialRun: workFlowRunTimestamp,
@@ -271,8 +280,6 @@ export async function Step3Days(userId: number, workFlowRunTimestamp: number) {
   }
 
   await CreateTask({
-    client,
-    parent,
     step: "paused",
     userId,
     initialRun: workFlowRunTimestamp,
@@ -358,18 +365,18 @@ async function hasUserLoggedIn({
 }
 
 async function CreateTask({
-  parent,
-  client,
   step,
   userId,
   initialRun,
 }: {
-  parent: string;
-  client: CloudTasksClient;
   step: z.infer<typeof workflowStepSchema>;
   userId: number;
   initialRun: number;
 }) {
+  if (selfHost()) {
+    return;
+  }
+  const { client, parent } = gcp();
   const url = `${env().WORKFLOWS_URL}/cron/monitors/${step}?userId=${userId}&initialRun=${initialRun}`;
   const timestamp = getScheduledTime(step);
   const taskName = `${parent}/tasks/workflow-${userId}-${step}-${initialRun}`;
