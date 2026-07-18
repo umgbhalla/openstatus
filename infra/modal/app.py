@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import socket
 import subprocess
@@ -18,9 +17,6 @@ PUBLIC_URL = os.environ.get(
     "OPENSTATUS_PUBLIC_URL", "https://umgbhalla--openstatus-gateway.modal.run"
 ).rstrip("/")
 REGION = os.environ.get("OPENSTATUS_MODAL_REGION", "us-west-2")
-# Tinybird workspace admin token, minted by bootstrap() and read by Gateway.start().
-# Persisted on the durable ClickHouse Volume so it survives across deploys.
-TOKEN_FILE = Path("/var/lib/clickhouse/.tb-token")
 
 app = modal.App(APP_NAME)
 bootstrap_app = modal.App(f"{APP_NAME}-bootstrap")
@@ -37,20 +33,9 @@ libsql_volume = modal.Volume.from_name(
 workflows_volume = modal.Volume.from_name(
     "openstatus-workflows-v2", create_if_missing=True, version=2
 )
-# Tinybird Local durable state: ClickHouse (analytics rows) + Redis (tinybird
-# server state). Fresh -v1 volumes — bootstrap re-mints the workspace token into
-# the ClickHouse volume (TOKEN_FILE) on first boot.
-tinybird_clickhouse_volume = modal.Volume.from_name(
-    "openstatus-tinybird-clickhouse-v1", create_if_missing=True, version=2
-)
-tinybird_redis_volume = modal.Volume.from_name(
-    "openstatus-tinybird-redis-v1", create_if_missing=True, version=2
-)
 
 volumes = {
     "/var/lib/sqld": libsql_volume,
-    "/var/lib/clickhouse": tinybird_clickhouse_volume,
-    "/redis-data": tinybird_redis_volume,
     "/app/data": workflows_volume,
 }
 secret = modal.Secret.from_name(
@@ -66,13 +51,9 @@ common_env = {
     "DATABASE_AUTH_TOKEN": "",
     "DB_URL": "http://127.0.0.1:8080",
     "DB_AUTH_TOKEN": "",
-    # Analytics via embedded Tinybird Local (ClickHouse). The URL is static (the
-    # base's nginx serves the tinybird API on :7181); the workspace token is
-    # runtime-injected by Gateway.start() from TOKEN_FILE — empty here is fine at
-    # build time and on the very first boot (before bootstrap has minted it).
-    # TINY_BIRD_API_KEY feeds the TS readers/writers; TINYBIRD_TOKEN feeds the Go
-    # checker; both read TINYBIRD_URL.
-    "TINYBIRD_URL": "http://127.0.0.1:7181",
+    # Analytics deliberately disabled: empty token → NoopTinybird (TS) and
+    # no-op event clients (Go). libSQL remains the monitoring source of truth.
+    "TINYBIRD_URL": "",
     "TINY_BIRD_API_KEY": "",
     "TINYBIRD_TOKEN": "",
     "WORKFLOWS_URL": "http://127.0.0.1:3000",
@@ -125,90 +106,30 @@ def stop_process(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=10)
 
 
-def fetch_tinybird_token(*, timeout: float = 300.0) -> str:
-    """Poll the Tinybird Local tokens endpoint until the workspace admin token is
-    minted. :7181 (nginx) opens early, but the token only exists once the base's
-    `setup` program has provisioned the default workspace — so retry, don't
-    single-shot."""
-    deadline = time.monotonic() + timeout
-    last_err: Exception | None = None
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen("http://127.0.0.1:7181/tokens", timeout=10) as response:
-                tokens = json.load(response)
-            token = tokens.get("workspace_admin_token") or tokens.get("workspace_token")
-            if token:
-                return str(token)
-        except Exception as err:  # noqa: BLE001 — endpoint 404/500s until setup finishes
-            last_err = err
-        time.sleep(2)
-    raise RuntimeError(f"Tinybird workspace token not available in time: {last_err}")
-
-
 @bootstrap_app.function(
     image=image,
     volumes=volumes,
     secrets=[secret],
     env=common_env,
-    cpu=8,
-    memory=16384,
-    timeout=1800,
+    cpu=4,
+    memory=8192,
+    timeout=900,
     region=REGION,
 )
 def bootstrap() -> dict[str, str]:
-    # Run only the base's tinybird stack (clickhouse/redis/tinybird_server/setup)
-    # under supervisord during bootstrap; disable OUR programs so the node apps
-    # and checker don't spin/error before the token exists. sqld is one of ours,
-    # so start it by hand for the DB migration.
-    conf = Path("/etc/supervisor/conf.d/openstatus.conf")
-    disabled = conf.with_suffix(".disabled")
-    if conf.exists():
-        conf.rename(disabled)
-
     sqld = subprocess.Popen(["/usr/local/bin/sqld"], cwd="/var/lib/sqld")
-    supervisor = subprocess.Popen(
-        ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
-    )
     try:
         wait_port(8080)
-        wait_port(7181, timeout=300)
-        token = fetch_tinybird_token()
-
-        env = {
-            **os.environ,
-            "DATABASE_URL": common_env["DATABASE_URL"],
-            "DATABASE_AUTH_TOKEN": "",
-            "TB_TOKEN": token,
-            "TINY_BIRD_API_KEY": token,
-            "TINYBIRD_TOKEN": token,
-            "TINYBIRD_URL": common_env["TINYBIRD_URL"],
-        }
         subprocess.run(
             ["/usr/local/bin/deno", "run", "-A", "--sloppy-imports", "src/migrate.mts"],
             cwd="/opt/openstatus/packages/db",
-            env=env,
             check=True,
         )
-        # Push all .datasource + .pipe defs into the local workspace.
-        subprocess.run(
-            ["/usr/local/bin/tb", "--local", "deploy"],
-            cwd="/opt/openstatus/packages/tinybird",
-            env=env,
-            check=True,
-        )
-        TOKEN_FILE.write_text(token, encoding="utf-8")
-        TOKEN_FILE.chmod(0o600)
     finally:
-        stop_process(supervisor)
         stop_process(sqld)
-        if disabled.exists():
-            disabled.rename(conf)
-
     libsql_volume.commit()
-    tinybird_clickhouse_volume.commit()
-    tinybird_redis_volume.commit()
     workflows_volume.commit()
-    return {"database": "migrated", "tinybird": "deployed"}
+    return {"database": "migrated"}
 
 
 @app.server(
@@ -219,9 +140,8 @@ def bootstrap() -> dict[str, str]:
     volumes=volumes,
     secrets=[secret],
     env=common_env,
-    cpu=8,
-    memory=16384,
-    ephemeral_disk=20480,
+    cpu=4,
+    memory=8192,
     min_containers=1,
     max_containers=1,
     target_concurrency=100,
@@ -232,26 +152,10 @@ def bootstrap() -> dict[str, str]:
 class Gateway:
     @modal.enter()
     def start(self) -> None:
-        # Inject the Tinybird workspace token BEFORE launching supervisord so every
-        # child (Go checker via TINYBIRD_TOKEN, node apps via TINY_BIRD_API_KEY)
-        # inherits it. Fail loud if bootstrap has not minted it yet.
-        if not TOKEN_FILE.exists():
-            raise RuntimeError("run bootstrap before deploying Gateway (missing tb token)")
-        token = TOKEN_FILE.read_text(encoding="utf-8").strip()
-        if not token:
-            raise RuntimeError("Tinybird workspace token is empty")
-        os.environ["TINYBIRD_URL"] = common_env["TINYBIRD_URL"]
-        os.environ["TINY_BIRD_API_KEY"] = token
-        os.environ["TINYBIRD_TOKEN"] = token
-
         self.process = subprocess.Popen(
             ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
         )
-        # 7181 = tinybird API (nginx). clickhouse/redis start at supervisor
-        # priority 1 (before our services); tinybird_server is priority 999, so
-        # analytics reads/writes self-heal once it is up — the checker tolerates
-        # a late Tinybird and the status page falls back to manual mode meanwhile.
-        ports = [8080, 7181, 3000, 3001, 8081, 8082, 3002, 3003, 8100]
+        ports = [8080, 3000, 3001, 8081, 8082, 3002, 3003, 8100]
         if os.environ.get("OPENSTATUS_KEY"):
             ports.append(8083)
         for port in ports:
@@ -261,8 +165,6 @@ class Gateway:
     def stop(self) -> None:
         stop_process(self.process)
         libsql_volume.commit()
-        tinybird_clickhouse_volume.commit()
-        tinybird_redis_volume.commit()
         workflows_volume.commit()
 
 

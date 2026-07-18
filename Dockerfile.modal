@@ -44,26 +44,14 @@ COPY apps/private-location .
 RUN apk add --no-cache ca-certificates tzdata && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/private-location ./cmd/server
 
 FROM denoland/deno:2.9.2 AS deno
-FROM node:24-slim AS node
 FROM ghcr.io/tursodatabase/libsql-server:latest AS libsql
 
-# Runtime base is tinybirdco/tinybird-local (Variant 2 — the pragmatic call in the
-# task): it already ships ClickHouse + Redis + the `tb` CLI + tinybird_server, all
-# managed by ITS OWN supervisord (/etc/supervisor/conf.d/supervisord.conf) and nginx
-# (sites-enabled/tinybird.conf on :7181/:7182). We layer node + deno + sqld + the Go
-# binaries + the Next standalone bundles on top, then MERGE our services into the
-# base's include dirs: our programs land in /etc/supervisor/conf.d/openstatus.conf
-# (merged with tinybird's) and our public :8100 nginx site in /etc/nginx/conf.d/
-# openstatus.conf (served by the base's single nginx, which already includes
-# conf.d/*.conf). No second nginx, no second supervisord — one of each. See
-# infra/modal/README.md for the full topology + rationale.
-FROM tinybirdco/tinybird-local:latest
+# Runtime: slim node base — sqld + deno + go binaries + Next standalone + nginx,
+# all supervised in one container. No Tinybird: analytics are a no-op self-hosted.
+FROM node:24-slim
 
-USER root
+RUN apt-get update && apt-get install -y --no-install-recommends nginx supervisor curl ca-certificates && rm -rf /var/lib/apt/lists/* && rm -f /etc/nginx/sites-enabled/default
 
-# tinybird-local has no node/deno/sqld — bring node (+npm/corepack) wholesale, then
-# the individual binaries. Merges into /usr/local without clobbering the base `tb`.
-COPY --from=node /usr/local/ /usr/local/
 COPY --from=deno /usr/bin/deno /usr/local/bin/deno
 COPY --from=libsql /bin/sqld /usr/local/bin/sqld
 COPY --from=checker-build /out/checker /opt/runtime/checker
@@ -82,6 +70,5 @@ COPY infra/modal/supervisor-openstatus.conf /etc/supervisor/conf.d/openstatus.co
 COPY infra/modal/nginx-openstatus.conf /etc/nginx/conf.d/openstatus.conf
 RUN chmod 0555 /opt/runtime/checker /opt/runtime/private-probe /opt/runtime/private-location /usr/local/bin/sqld && mkdir -p /var/lib/sqld /app/data
 
-# 8100: tinybird's own nginx already owns 7181/7182 in this base — no collision.
 EXPOSE 8100
 CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
