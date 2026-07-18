@@ -78,6 +78,35 @@ container stdout instead of emailing it — read it with `modal app logs
 openstatus`. GitHub OAuth is the primary login path. A real `RESEND_API_KEY`
 only matters after patching the dashboard auth provider to actually send email.
 
+### Email + password login
+
+Self-host mode (`SELF_HOST=true`, always set here) also enables an email +
+password login on `/login` via the Auth.js Credentials provider. This uses the
+JWT session strategy (only when `SELF_HOST=true`) and a nullable
+`user.password_hash` column (migration `0081_fine_iron_patriot`).
+
+The user row must already exist — sign in once with GitHub/Google/magic-link to
+create the user and its workspace, then stamp a bcrypt password hash with the
+`set-password` script.
+
+libSQL binds to loopback (`127.0.0.1:8080`) inside the running Gateway
+container, so run the script INSIDE that live container (never spin up a second
+`sqld` against the Volume — that breaks the single-writer fence). Exec into the
+running container:
+
+```bash
+CID=$(modal container list --env "$MODAL_ENVIRONMENT" | grep openstatus | awk '{print $1}')
+modal container exec "$CID" sh -c \
+  'cd /opt/openstatus/packages/db && \
+   DATABASE_URL=http://127.0.0.1:8080 DATABASE_AUTH_TOKEN= \
+   /usr/local/bin/deno run -A --sloppy-imports src/set-password.mts \
+   admin@example.com "correct-horse-battery"'
+```
+
+The script errors clearly if no user with that email exists (it never creates a
+user or workspace). Passwords must be at least 8 characters. Re-running it resets
+the password for that user.
+
 Region: single self-host checker region is `ams` (`FLY_REGION`/`SELF_HOST_REGION`).
 Create monitors with region `ams` only — other regions trigger fly-replay
 semantics that have no proxy here.

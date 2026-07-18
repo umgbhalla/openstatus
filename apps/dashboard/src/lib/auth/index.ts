@@ -7,16 +7,30 @@ import NextAuth from "next-auth";
 import { headers } from "next/headers";
 
 import { adapter } from "./adapter";
-import { GitHubProvider, GoogleProvider, ResendProvider } from "./providers";
+import {
+  CredentialsProvider,
+  GitHubProvider,
+  GoogleProvider,
+  ResendProvider,
+} from "./providers";
 
 export type { DefaultSession };
+
+const isSelfHost = process.env.SELF_HOST === "true";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   // debug: true,
   adapter,
+  // The Credentials provider (self-host email+password) requires the JWT
+  // session strategy — the drizzle adapter's database sessions are incompatible
+  // with it. Only opt into JWT sessions when SELF_HOST is enabled so the hosted
+  // deployment keeps its existing database-session behavior untouched.
+  ...(isSelfHost ? { session: { strategy: "jwt" as const } } : {}),
   providers:
-    process.env.NODE_ENV === "development" || process.env.SELF_HOST === "true"
-      ? [GitHubProvider, GoogleProvider, ResendProvider]
+    process.env.NODE_ENV === "development" || isSelfHost
+      ? isSelfHost
+        ? [GitHubProvider, GoogleProvider, ResendProvider, CredentialsProvider]
+        : [GitHubProvider, GoogleProvider, ResendProvider]
       : [GitHubProvider, GoogleProvider],
   callbacks: {
     async redirect({ url, baseUrl }) {
@@ -87,6 +101,12 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       return true;
     },
     async session(params) {
+      // Under the JWT session strategy (SELF_HOST credentials login) there is
+      // no adapter-provided `user`, so surface the user id from the token so
+      // `session.user.id` stays populated for downstream consumers.
+      if ("token" in params && params.token?.sub) {
+        params.session.user.id = params.token.sub;
+      }
       return params.session;
     },
   },

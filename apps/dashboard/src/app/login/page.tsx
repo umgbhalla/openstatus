@@ -9,6 +9,7 @@ import { signIn } from "@/lib/auth";
 
 import { LoginButton } from "./_components/login-button";
 import MagicLinkForm from "./_components/magic-link-form";
+import PasswordLoginForm from "./_components/password-login-form";
 import { searchParamsCache } from "./search-params";
 
 export const metadata: Metadata = {
@@ -42,6 +43,9 @@ export default async function Page(props: {
         {process.env.NODE_ENV === "development" ||
         process.env.SELF_HOST === "true" ? (
           <div className="grid gap-4">
+            {process.env.SELF_HOST === "true" ? (
+              <PasswordLoginForm redirectTo={redirectTo ?? undefined} />
+            ) : null}
             <MagicLinkForm />
             <Separator />
           </div>

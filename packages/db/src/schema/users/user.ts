@@ -24,6 +24,10 @@ export const user = sqliteTable("user", {
   email: text("email").default(""),
   emailVerified: integer("emailVerified", { mode: "timestamp_ms" }),
 
+  // self-host email+password credentials login (SELF_HOST only); nullable so
+  // OAuth/magic-link users never carry a hash. Set via set-password.mts.
+  passwordHash: text("password_hash"),
+
   createdAt: integer("created_at", { mode: "timestamp" }).default(
     sql`(strftime('%s', 'now'))`,
   ),
