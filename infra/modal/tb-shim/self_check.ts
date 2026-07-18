@@ -6,6 +6,7 @@
 //
 import {
   bucketLatency,
+  metricsSummaryRows,
   PERIOD_MS,
   quantile,
   summarizeMetrics,
@@ -68,6 +69,25 @@ Deno.test("summarizeMetrics: sane p50/p95 + status counts", () => {
     throw new Error(`p95 out of range: ${p95}`);
   }
   assertEquals(row.lastTimestamp, 1_700_000_000_000 + 5 * 1000);
+});
+
+Deno.test("metricsSummaryRows: two rows, current folds last", () => {
+  // The overview tiles (uptime/degraded/failing/requests/lastChecked + p50..p99)
+  // read this pipe. GlobalUptimeSection returns all-zero tiles unless it gets
+  // EXACTLY two rows — regression guard for the single-row bug.
+  const rows = metricsSummaryRows(sampleRows(), sampleRows().slice(0, 3));
+  assertEquals(rows.length, 2);
+  // Previous window comes first and MUST carry a null lastTimestamp so the
+  // reader sorts (and folds) the current window last.
+  assertEquals(rows[0].lastTimestamp, null);
+  assertEquals(rows[0].count, 3);
+  // Current window carries the real aggregate + max cron_timestamp.
+  assertEquals(rows[1].count, 6);
+  assertEquals(rows[1].success, 4);
+  assertEquals(rows[1].degraded, 1);
+  assertEquals(rows[1].error, 1);
+  assertEquals(rows[1].p50Latency, 350);
+  assertEquals(rows[1].lastTimestamp, 1_700_000_000_000 + 5 * 1000);
 });
 
 Deno.test("bucketLatency: one bucket, integer percentiles", () => {

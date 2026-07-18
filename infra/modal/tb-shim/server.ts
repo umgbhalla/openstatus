@@ -455,6 +455,25 @@ export function summarizeMetrics(
   };
 }
 
+/**
+ * The two-row payload the overview summary + percentile tiles read.
+ * GlobalUptimeSection.defineMetrics() REQUIRES exactly two rows — the current
+ * window and the one immediately before it — to compute the trend badges, and
+ * returns all-zero tiles on any other row count. The real Tinybird pipe
+ * UNION ALLs current+previous; mirror that. The previous row's lastTimestamp is
+ * nulled so the reader (which sorts the row carrying a lastTimestamp last) folds
+ * the current window's values in last and trends them against the previous one.
+ */
+export function metricsSummaryRows(
+  current: Record<string, unknown>[],
+  previous: Record<string, unknown>[],
+): Record<string, unknown>[] {
+  return [
+    { ...summarizeMetrics(previous), lastTimestamp: null },
+    summarizeMetrics(current),
+  ];
+}
+
 function bucketOf(cronTs: unknown, bucketMs: number): number {
   return Math.floor((Number(cronTs) || 0) / bucketMs) * bucketMs;
 }
@@ -711,11 +730,37 @@ const FAMILIES: Family[] = [
     },
   },
   // --- summary tiles (percentiles + status counts) -----------------------
+  // Returns TWO rows (current + previous window). The reader bails to all-zero
+  // tiles unless it gets exactly two — see metricsSummaryRows.
   {
     re: new RegExp(`^endpoint__(http|tcp|dns)_metrics_${PERIOD}__v[01]$`),
     run: async (m, p) => {
-      const [rows] = await windowRows(m[1], m[2], p, METRIC_COLS);
-      return [summarizeMetrics(rows)];
+      const type = m[1];
+      const period = m[2];
+      const monitorId = p.get("monitorId") ?? "";
+      const regions = list(p, "regions");
+      const fromMs =
+        toMs(p.get("fromDate")) ??
+        Date.now() - (PERIOD_MS[period] ?? PERIOD_MS["1d"]);
+      const toMsV = toMs(p.get("toDate")) ?? Date.now();
+      const windowLen = toMsV - fromMs;
+      const current = await fetchRows(
+        type,
+        monitorId,
+        fromMs,
+        toMsV,
+        METRIC_COLS,
+        regions,
+      );
+      const previous = await fetchRows(
+        type,
+        monitorId,
+        fromMs - windowLen,
+        fromMs - 1,
+        METRIC_COLS,
+        regions,
+      );
+      return metricsSummaryRows(current, previous);
     },
   },
   // --- latency-over-time (single + multi monitor) ------------------------
