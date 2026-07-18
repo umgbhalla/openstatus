@@ -31,6 +31,24 @@ export default async function Page(props: {
   const searchParams = await props.searchParams;
   const { redirectTo } = searchParamsCache.parse(searchParams);
 
+  // Self-host with no email/OAuth provider keys: email+password is the ONLY
+  // login path. Skip magic-link (needs Resend) and the OAuth buttons entirely.
+  if (process.env.SELF_HOST === "true") {
+    return (
+      <div className="my-16 grid w-full max-w-lg gap-6">
+        <div className="flex flex-col gap-1 text-center">
+          <h1 className="font-cal text-3xl tracking-tight">Sign In</h1>
+          <p className="font-commit-mono text-muted-foreground text-sm text-pretty">
+            Self-hosted OpenStatus.
+          </p>
+        </div>
+        <div className="grid gap-4 p-4">
+          <PasswordLoginForm redirectTo={redirectTo ?? undefined} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="my-16 grid w-full max-w-lg gap-6">
       <div className="flex flex-col gap-1 text-center">
@@ -40,12 +58,8 @@ export default async function Page(props: {
         </p>
       </div>
       <div className="grid gap-4 p-4">
-        {process.env.NODE_ENV === "development" ||
-        process.env.SELF_HOST === "true" ? (
+        {process.env.NODE_ENV === "development" ? (
           <div className="grid gap-4">
-            {process.env.SELF_HOST === "true" ? (
-              <PasswordLoginForm redirectTo={redirectTo ?? undefined} />
-            ) : null}
             <MagicLinkForm />
             <Separator />
           </div>

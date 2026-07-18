@@ -193,7 +193,9 @@ def exec(command: str) -> str:
     finally:
         stop_process(sqld)
     libsql_volume.commit()
-    return f"rc={result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    out = f"rc={result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    print(out)
+    return out
 
 
 def call_workflow(path: str) -> None:
