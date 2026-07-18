@@ -1,5 +1,5 @@
 import { expect } from "@std/expect";
-import { describe, test } from "@std/testing/bdd";
+import { afterEach, describe, test } from "@std/testing/bdd";
 
 import type { ResolvedRoute } from "../resolve-route";
 import { resolveDefaultRewrite } from "./resolve-default-rewrite";
@@ -101,5 +101,40 @@ describe("resolveDefaultRewrite", () => {
       requestUrl: "https://www.openstatus.dev/docs/acme/en",
     });
     expect(action?.reason).toBe("default-rewrite");
+  });
+});
+
+describe("resolveDefaultRewrite with basePath (self-host subpath)", () => {
+  afterEach(() => {
+    delete process.env.STATUS_PAGE_BASE_PATH;
+  });
+
+  // Regression: `/status/harp` (basePath stripped to `/harp`) must rewrite to
+  // `/status/harp/en`, not `/harp/en` — the latter drops the basePath and Next
+  // can't match the route → 404.
+  test("basePath set + path differs: rewrite target includes basePath", () => {
+    process.env.STATUS_PAGE_BASE_PATH = "/status";
+    const action = resolveDefaultRewrite({
+      route: { ...pathnameRoute, prefix: "harp", rewritePath: "/harp/en" },
+      // Next strips basePath from the middleware pathname.
+      host: "umgbhalla--openstatus-gateway.us-east.modal.direct",
+      pathname: "/harp",
+      search: "",
+      requestUrl: "http://0.0.0.0:3003/harp",
+    });
+    expect(action?.type).toBe("rewrite");
+    expect(action?.url?.pathname).toBe("/status/harp/en");
+  });
+
+  test("basePath set + path matches: passes (null) — /status/harp/en passthrough", () => {
+    process.env.STATUS_PAGE_BASE_PATH = "/status";
+    const action = resolveDefaultRewrite({
+      route: { ...pathnameRoute, prefix: "harp", rewritePath: "/harp/en" },
+      host: "umgbhalla--openstatus-gateway.us-east.modal.direct",
+      pathname: "/harp/en",
+      search: "",
+      requestUrl: "http://0.0.0.0:3003/harp/en",
+    });
+    expect(action).toBeNull();
   });
 });

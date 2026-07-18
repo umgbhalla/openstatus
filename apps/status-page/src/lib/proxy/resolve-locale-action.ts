@@ -2,6 +2,7 @@ import type { Page } from "@openstatus/db/src/schema";
 
 import { stripPrefixForExternal } from "./strip-prefix-for-external";
 import type { Action, ComposeInput } from "./types";
+import { applyBasePath } from "./with-base-path";
 
 type Input = Pick<ComposeInput, "route" | "requestUrl"> & {
   page: Pick<Page, "locales" | "defaultLocale">;
@@ -37,7 +38,7 @@ export function resolveLocaleAction({
   const externalPath = stripPrefixForExternal(route, redirectPath);
   return {
     type: "redirect",
-    url: new URL(externalPath || "/", requestUrl),
+    url: applyBasePath(new URL(externalPath || "/", requestUrl)),
     reason: "locale-mismatch-redirect",
   };
 }

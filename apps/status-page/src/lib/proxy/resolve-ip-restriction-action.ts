@@ -3,6 +3,7 @@ import type { Page } from "@openstatus/db/src/schema";
 import { isIpAuthorized } from "./access-predicates";
 import { buildExternalPath } from "./build-external-path";
 import type { Action, ComposeInput } from "./types";
+import { withBasePath } from "./with-base-path";
 
 type Input = Pick<
   ComposeInput,
@@ -34,7 +35,9 @@ export function resolveIpRestrictionAction({
   if (!isOnRestricted && !allowed) {
     return {
       type: "redirect",
-      url: new URL(`${origin}${buildExternalPath(route, "/restricted")}`),
+      url: new URL(
+        `${origin}${withBasePath(buildExternalPath(route, "/restricted"))}`,
+      ),
       reason: "ip-restriction-gate-in",
     };
   }
@@ -43,7 +46,7 @@ export function resolveIpRestrictionAction({
   if (isOnRestricted && allowed) {
     return {
       type: "redirect",
-      url: new URL(`${origin}${buildExternalPath(route, "")}`),
+      url: new URL(`${origin}${withBasePath(buildExternalPath(route, ""))}`),
       reason: "ip-restriction-gate-out",
     };
   }

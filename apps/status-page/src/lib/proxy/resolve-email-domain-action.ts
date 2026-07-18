@@ -3,6 +3,7 @@ import type { Page } from "@openstatus/db/src/schema";
 import { isEmailDomainAuthorized } from "./access-predicates";
 import { buildExternalPath } from "./build-external-path";
 import type { Action, ComposeInput } from "./types";
+import { withBasePath } from "./with-base-path";
 
 type Input = Pick<
   ComposeInput,
@@ -39,7 +40,9 @@ export function resolveEmailDomainAction({
   if (!isOnLogin && !isAuthorised) {
     return {
       type: "redirect",
-      url: new URL(`${origin}${buildExternalPath(route, "/login")}`),
+      url: new URL(
+        `${origin}${withBasePath(buildExternalPath(route, "/login"))}`,
+      ),
       reason: "email-domain-gate-in",
     };
   }
@@ -47,7 +50,7 @@ export function resolveEmailDomainAction({
   // Gate-out: authorised and on /login → send to the originally-requested path
   // (if provided) or page root. Mirrors password-gate-out's redirect-honouring.
   if (isOnLogin && isAuthorised) {
-    const target = redirectParam ?? buildExternalPath(route, "");
+    const target = withBasePath(redirectParam ?? buildExternalPath(route, ""));
     return {
       type: "redirect",
       url: new URL(`${origin}${target}`),

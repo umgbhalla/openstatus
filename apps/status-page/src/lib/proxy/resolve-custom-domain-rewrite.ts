@@ -2,6 +2,7 @@ import type { Page } from "@openstatus/db/src/schema";
 
 import { getValidSubdomain } from "../domain";
 import type { Action, ComposeInput } from "./types";
+import { applyBasePath } from "./with-base-path";
 
 type Input = Pick<
   ComposeInput,
@@ -46,7 +47,7 @@ export function resolveCustomDomainRewrite({
     // emit `/{slug}` without a trailing slash to match Branch 4's semantics
     // and avoid a redundant 308 from Next.js trailing-slash handling.
     const path = rest ? `/${page.slug}/${rest}` : `/${page.slug}`;
-    const url = new URL(path, requestUrl);
+    const url = applyBasePath(new URL(path, requestUrl));
     url.search = search;
     return {
       type: "rewrite",
@@ -55,7 +56,8 @@ export function resolveCustomDomainRewrite({
     };
   }
 
-  // Branch 2 & 3: subdomain present — rewrite to the stpg.dev host.
+  // Branch 2 & 3: subdomain present — rewrite to the stpg.dev host. These target
+  // a different (hosted) origin with no basePath, so they are left untouched.
   if (subdomain) {
     if (pathnames.length > 2) {
       const rest = pathnames.slice(1).join("/");
@@ -77,7 +79,7 @@ export function resolveCustomDomainRewrite({
   }
 
   // Branch 4: fallback — rewrite to the bare slug.
-  const url = new URL(`/${page.slug}`, requestUrl);
+  const url = applyBasePath(new URL(`/${page.slug}`, requestUrl));
   url.search = search;
   return {
     type: "rewrite",

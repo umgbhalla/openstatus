@@ -1,4 +1,5 @@
 import type { Action, ComposeInput } from "./types";
+import { applyBasePath } from "./with-base-path";
 
 type Input = Pick<
   ComposeInput,
@@ -25,7 +26,7 @@ export function resolveDefaultRewrite({
 
   if (!isOpenstatusDevHost && !pathDiffers) return null;
 
-  const url = new URL(route.rewritePath, requestUrl);
+  const url = applyBasePath(new URL(route.rewritePath, requestUrl));
   url.search = search;
   return {
     type: "rewrite",

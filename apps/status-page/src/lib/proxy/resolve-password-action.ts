@@ -3,6 +3,7 @@ import type { Page } from "@openstatus/db/src/schema";
 import { isPasswordAuthorized } from "./access-predicates";
 import { buildExternalPath } from "./build-external-path";
 import type { Action, ComposeInput } from "./types";
+import { withBasePath } from "./with-base-path";
 
 type Input = Pick<
   ComposeInput,
@@ -71,7 +72,7 @@ export function resolvePasswordAction({
     return {
       type: "redirect",
       url: new URL(
-        `${origin}${buildExternalPath(route, "/login")}?redirect=${encodeURIComponent(pathname)}`,
+        `${origin}${withBasePath(buildExternalPath(route, "/login"))}?redirect=${encodeURIComponent(withBasePath(pathname))}`,
       ),
       reason: "password-gate-in",
     };
@@ -92,10 +93,10 @@ export function resolvePasswordAction({
     return {
       type: "redirect",
       url: new URL(
-        `${origin}${
+        `${origin}${withBasePath(
           redirectParam ??
-          (route.type === "pathname" ? `/${route.prefix}` : "/")
-        }`,
+            (route.type === "pathname" ? `/${route.prefix}` : "/"),
+        )}`,
       ),
       reason: "password-gate-out",
     };

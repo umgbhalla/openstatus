@@ -9,6 +9,7 @@ import { applyPageLocaleOverride } from "./lib/proxy/apply-page-locale-override"
 import { composePageAction } from "./lib/proxy/compose-page-action";
 import { detectMarkdown } from "./lib/proxy/detect-markdown";
 import { sanitizeRedirectParam } from "./lib/proxy/sanitize-redirect-param";
+import { withBasePath } from "./lib/proxy/with-base-path";
 import { resolveRoute } from "./lib/resolve-route";
 
 const isSelfHosted = process.env.SELF_HOST === "true";
@@ -44,7 +45,9 @@ export default auth(async (req) => {
   // /login (it would never reach the route).
   if (wantsMarkdown) {
     const rewriteUrl = url.clone();
-    rewriteUrl.pathname = `/api/markdown${initialRoute.rewritePath}`;
+    rewriteUrl.pathname = withBasePath(
+      `/api/markdown${initialRoute.rewritePath}`,
+    );
     const requestHeaders = new Headers(req.headers);
     requestHeaders.set("x-md-source", source ?? "header");
     return NextResponse.rewrite(rewriteUrl, {
