@@ -64,7 +64,8 @@ const getBaseUrl = () => {
   // Note: status-page has its own tRPC API routes
   if (process.env.VERCEL_URL)
     return `https://${stripScheme(process.env.VERCEL_URL)}`;
-  return "http://localhost:3000"; // Local dev and Docker (internal calls)
+  // Self-host: the status-page's own listen port — never assume 3000.
+  return `http://127.0.0.1:${process.env.PORT || "3000"}`;
 };
 
 // The whole tRPC surface is served from a single Node.js endpoint — there is
@@ -79,6 +80,6 @@ export const endingLink =
       headers: opts?.headers,
       fetch: opts?.fetch,
       transformer: superjson,
-      url: `${getBaseUrl()}/api/trpc/lambda`,
+      url: `${getBaseUrl()}${process.env.STATUS_PAGE_BASE_PATH || ""}/api/trpc/lambda`,
       // oxlint-disable-next-line typescript/no-explicit-any -- FIXME: remove any
     } satisfies Partial<HTTPBatchLinkOptions<any>>)(runtime);

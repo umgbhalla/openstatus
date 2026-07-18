@@ -4,14 +4,20 @@ import { drizzle } from "drizzle-orm/libsql";
 
 import { env } from "../env";
 
-const file =
-  env().NODE_ENV === "development" ? "./dev.db" : "///app/data/replica.db";
-const client = createClient({
-  url: `file:${file}`,
-  syncUrl: env().DATABASE_URL,
-  authToken: env().DATABASE_AUTH_TOKEN,
-  syncInterval: 60,
-});
+// Self-host runs sqld on localhost: an embedded replica buys nothing and its
+// construction-time initial sync blocks the process before Deno.serve.
+const client =
+  process.env.SELF_HOST === "true"
+    ? createClient({
+        url: env().DATABASE_URL,
+        authToken: env().DATABASE_AUTH_TOKEN || undefined,
+      })
+    : createClient({
+        url: `file:${env().NODE_ENV === "development" ? "./dev.db" : "///app/data/replica.db"}`,
+        syncUrl: env().DATABASE_URL,
+        authToken: env().DATABASE_AUTH_TOKEN,
+        syncInterval: 60,
+      });
 
 export const db = drizzle({
   client: client,

@@ -62,6 +62,7 @@ common_env = {
     "NEXT_PUBLIC_URL": PUBLIC_URL,
     "SITE_URL": PUBLIC_URL,
     "STATUS_PAGE_BASE_URL": f"{PUBLIC_URL}/status",
+    "STATUS_PAGE_BASE_PATH": "/status",
     "FLY_REGION": "ams",
     "SELF_HOST_REGION": "ams",
     "SQLD_NODE": "primary",
