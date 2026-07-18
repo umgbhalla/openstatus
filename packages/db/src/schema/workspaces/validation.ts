@@ -62,10 +62,16 @@ export const selectWorkspaceSchema = createSelectSchema(workspace)
       .nullish(),
   })
   .transform((val) => {
+    // Self-host has no billing: force every workspace to the top tier at the
+    // one seam every gate reads (ctx.workspace.plan + .limits), so plan/limit
+    // checks across routers/services all resolve to scale. Corrects existing
+    // rows too — no DB migration needed.
+    const effectivePlan = process.env.SELF_HOST === "true" ? "scale" : val.plan;
     return {
       ...val,
+      plan: effectivePlan,
       limits: limitsSchema.parse({
-        ...allPlans[val.plan].limits,
+        ...allPlans[effectivePlan].limits,
         /**
          * override the default plan limits
          * allows us to set custom limits for a workspace
