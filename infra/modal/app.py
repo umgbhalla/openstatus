@@ -168,6 +168,34 @@ class Gateway:
         workflows_volume.commit()
 
 
+@bootstrap_app.function(
+    image=image,
+    volumes=volumes,
+    secrets=[secret],
+    env=common_env,
+    cpu=2,
+    memory=4096,
+    timeout=600,
+    region=REGION,
+)
+def exec(command: str) -> str:
+    """One-off maintenance against the durable libSQL volume (set-password,
+    ad-hoc SQL). ``command`` is a shell string. Starts sqld, runs it, tears down."""
+    sqld = subprocess.Popen(["/usr/local/bin/sqld"], cwd="/var/lib/sqld")
+    try:
+        wait_port(8080)
+        result = subprocess.run(
+            ["/bin/sh", "-c", command],
+            capture_output=True,
+            text=True,
+            cwd="/opt/openstatus",
+        )
+    finally:
+        stop_process(sqld)
+    libsql_volume.commit()
+    return f"rc={result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+
+
 def call_workflow(path: str) -> None:
     request = urllib.request.Request(
         f"{PUBLIC_URL}/internal/workflows{path}",
