@@ -25,11 +25,18 @@ export const getValidSubdomain = (host?: string | null) => {
     return match?.[1] || null;
   }
 
+  // Self-host always uses path-based page routing (/status/<slug>), never
+  // subdomain/custom-domain — no per-page DNS in a single Modal container.
+  if (process.env.SELF_HOST === "true") {
+    return null;
+  }
+
   // Managed deployment hosts use path-based page routing.
   if (
     host?.includes(".") &&
     !host.includes(".vercel.app") &&
-    !host.includes(".modal.run")
+    !host.includes(".modal.run") &&
+    !host.includes(".modal.direct")
   ) {
     const candidate = host.split(".")[0];
     if (candidate && !candidate.includes("www")) {
@@ -45,7 +52,8 @@ export const getValidSubdomain = (host?: string | null) => {
       host?.includes("stpg.dev") ||
       host?.includes("openstatus.dev") ||
       host?.endsWith(".vercel.app") ||
-      host?.endsWith(".modal.run")
+      host?.endsWith(".modal.run") ||
+      host?.endsWith(".modal.direct")
     )
   ) {
     subdomain = host;
@@ -74,10 +82,12 @@ export const getValidCustomDomain = (req: NextRequest | Request) => {
   });
 
   if (
+    process.env.SELF_HOST !== "true" &&
     hostnames.length > 2 &&
     hostnames[0] !== "www" &&
     !url.host.endsWith(".vercel.app") &&
-    !url.host.endsWith(".modal.run")
+    !url.host.endsWith(".modal.run") &&
+    !url.host.endsWith(".modal.direct")
   ) {
     prefix = hostnames[0].toLowerCase();
     type = "hostname";

@@ -40,10 +40,12 @@ export function resolveRoute({
   let type: RouteType;
 
   if (
+    process.env.SELF_HOST !== "true" &&
     hostnames.length > 2 &&
     hostnames[0] !== "www" &&
     !urlHost.endsWith(".vercel.app") &&
-    !urlHost.endsWith(".modal.run")
+    !urlHost.endsWith(".modal.run") &&
+    !urlHost.endsWith(".modal.direct")
   ) {
     prefix = hostnames[0].toLowerCase();
     type = "hostname";
