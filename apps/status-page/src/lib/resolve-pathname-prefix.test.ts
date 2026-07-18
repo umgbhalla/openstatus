@@ -7,11 +7,11 @@ const defaultLocale = "en";
 
 describe("resolvePathnamePrefix", () => {
   describe("hostname routing (subdomain)", () => {
-    test("acme.localhost:3000 + en → empty (default locale)", () => {
+    test("acme.localhost + en → empty (default locale)", () => {
       expect(
         resolvePathnamePrefix({
           hostname: "acme.localhost",
-          pathname: "/",
+          slug: "acme",
           customDomain: undefined,
           locale: "en",
           defaultLocale,
@@ -19,11 +19,11 @@ describe("resolvePathnamePrefix", () => {
       ).toBe("");
     });
 
-    test("acme.localhost:3000 + fr → 'fr'", () => {
+    test("acme.localhost + fr → 'fr'", () => {
       expect(
         resolvePathnamePrefix({
           hostname: "acme.localhost",
-          pathname: "/",
+          slug: "acme",
           customDomain: undefined,
           locale: "fr",
           defaultLocale,
@@ -31,11 +31,11 @@ describe("resolvePathnamePrefix", () => {
       ).toBe("fr");
     });
 
-    test("acme.localhost:3000/events + fr → 'fr'", () => {
+    test("acme.stpg.dev + fr → 'fr'", () => {
       expect(
         resolvePathnamePrefix({
-          hostname: "acme.localhost",
-          pathname: "/events",
+          hostname: "acme.stpg.dev",
+          slug: "acme",
           customDomain: undefined,
           locale: "fr",
           defaultLocale,
@@ -49,7 +49,7 @@ describe("resolvePathnamePrefix", () => {
       expect(
         resolvePathnamePrefix({
           hostname: "status.acme.com",
-          pathname: "/",
+          slug: "acme",
           customDomain: "status.acme.com",
           locale: "en",
           defaultLocale,
@@ -61,33 +61,21 @@ describe("resolvePathnamePrefix", () => {
       expect(
         resolvePathnamePrefix({
           hostname: "status.acme.com",
-          pathname: "/",
+          slug: "acme",
           customDomain: "status.acme.com",
           locale: "fr",
           defaultLocale,
         }),
       ).toBe("fr");
     });
-
-    test("status.acme.com/monitors/1 + en → empty", () => {
-      expect(
-        resolvePathnamePrefix({
-          hostname: "status.acme.com",
-          pathname: "/monitors/1",
-          customDomain: "status.acme.com",
-          locale: "en",
-          defaultLocale,
-        }),
-      ).toBe("");
-    });
   });
 
   describe("pathname routing", () => {
-    test("localhost + /acme + en → 'acme/en'", () => {
+    test("localhost + acme + en → 'acme/en'", () => {
       expect(
         resolvePathnamePrefix({
           hostname: "localhost",
-          pathname: "/acme",
+          slug: "acme",
           customDomain: undefined,
           locale: "en",
           defaultLocale,
@@ -95,64 +83,70 @@ describe("resolvePathnamePrefix", () => {
       ).toBe("acme/en");
     });
 
-    test("localhost + /acme + fr → 'acme/fr'", () => {
+    test("localhost + acme + fr → 'acme/fr'", () => {
       expect(
         resolvePathnamePrefix({
           hostname: "localhost",
-          pathname: "/acme",
+          slug: "acme",
           customDomain: undefined,
           locale: "fr",
           defaultLocale,
         }),
       ).toBe("acme/fr");
     });
+  });
 
-    test("localhost + /acme/en/events + en → 'acme/en'", () => {
+  describe("self-host + managed deployment (path-based routing)", () => {
+    // Regression: the modal host has 4 labels and was misclassified as a
+    // subdomain, dropping the slug from nav links (→ /status/events 404).
+    test("*.modal.direct keeps the slug (pathname routing)", () => {
       expect(
         resolvePathnamePrefix({
-          hostname: "localhost",
-          pathname: "/acme/en/events",
+          hostname: "umgbhalla--openstatus-gateway.us-east.modal.direct",
+          slug: "harp",
           customDomain: undefined,
           locale: "en",
           defaultLocale,
         }),
-      ).toBe("acme/en");
+      ).toBe("harp/en");
     });
 
-    test("localhost + /acme/fr/monitors/123 + fr → 'acme/fr'", () => {
+    test("*.modal.run keeps the slug (pathname routing)", () => {
       expect(
         resolvePathnamePrefix({
-          hostname: "localhost",
-          pathname: "/acme/fr/monitors/123",
-          customDomain: undefined,
-          locale: "fr",
-          defaultLocale,
-        }),
-      ).toBe("acme/fr");
-    });
-
-    test("localhost + /status + en → 'status/en'", () => {
-      expect(
-        resolvePathnamePrefix({
-          hostname: "localhost",
-          pathname: "/status",
+          hostname: "umgbhalla--openstatus-gateway.modal.run",
+          slug: "harp",
           customDomain: undefined,
           locale: "en",
           defaultLocale,
         }),
-      ).toBe("status/en");
+      ).toBe("harp/en");
     });
 
-    test("localhost + /status/fr/events + fr → 'status/fr'", () => {
+    test("isSelfHost forces pathname routing even on a multi-label host", () => {
       expect(
         resolvePathnamePrefix({
-          hostname: "localhost",
-          pathname: "/status/fr/events",
+          hostname: "status.acme.com",
+          slug: "harp",
           customDomain: undefined,
-          locale: "fr",
+          locale: "en",
           defaultLocale,
+          isSelfHost: true,
         }),
-      ).toBe("status/fr");
+      ).toBe("harp/en");
+    });
+
+    test("isSelfHost ignores customDomain (always path-based)", () => {
+      expect(
+        resolvePathnamePrefix({
+          hostname: "status.acme.com",
+          slug: "harp",
+          customDomain: "status.acme.com",
+          locale: "en",
+          defaultLocale,
+          isSelfHost: true,
+        }),
+      ).toBe("harp/en");
     });
   });
 
@@ -161,7 +155,7 @@ describe("resolvePathnamePrefix", () => {
       expect(
         resolvePathnamePrefix({
           hostname: "www.openstatus.dev",
-          pathname: "/acme",
+          slug: "acme",
           customDomain: undefined,
           locale: "en",
           defaultLocale,
@@ -173,7 +167,7 @@ describe("resolvePathnamePrefix", () => {
       expect(
         resolvePathnamePrefix({
           hostname: "my-app.vercel.app",
-          pathname: "/acme",
+          slug: "acme",
           customDomain: undefined,
           locale: "fr",
           defaultLocale,
@@ -186,7 +180,7 @@ describe("resolvePathnamePrefix", () => {
       expect(
         resolvePathnamePrefix({
           hostname: "acme.openstatus.dev",
-          pathname: "/",
+          slug: "acme",
           customDomain: "other.domain.com",
           locale: "fr",
           defaultLocale,

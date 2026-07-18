@@ -1,6 +1,7 @@
-import type { Status } from "@openstatus/react";
-import { getStatus } from "@openstatus/react";
+import type { Status } from "@openstatus/tracker";
 import type { NextRequest } from "next/server";
+
+import { getPageStatus } from "../../../../../../../lib/get-page-status";
 
 const statusDictionary: Record<Status, { label: string; hexColor: string }> = {
   operational: {
@@ -59,7 +60,7 @@ export async function GET(
   props: { params: Promise<{ domain: string }> },
 ) {
   const params = await props.params;
-  const { status } = await getStatus(params.domain);
+  const status = await getPageStatus(params.domain);
   const theme = req.nextUrl.searchParams.get("theme") ?? "light";
   const variant = req.nextUrl.searchParams.get("variant") ?? "default";
   const size = req.nextUrl.searchParams.get("size") ?? "sm";

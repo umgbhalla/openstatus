@@ -1,7 +1,8 @@
-import type { Status } from "@openstatus/react";
-import { getStatus } from "@openstatus/react";
+import type { Status } from "@openstatus/tracker";
 import { ImageResponse } from "next/og";
 import type { NextRequest } from "next/server";
+
+import { getPageStatus } from "../../../../../../lib/get-page-status";
 
 // Keep the `label` size within a maximum of 'Operational' to stay within the `SIZE` restriction
 const statusDictionary: Record<Status, { label: string; color: string }> = {
@@ -47,7 +48,7 @@ export async function GET(
   props: { params: Promise<{ domain: string }> },
 ) {
   const params = await props.params;
-  const { status } = await getStatus(params.domain);
+  const status = await getPageStatus(params.domain);
   const theme = req.nextUrl.searchParams.get("theme");
   const size = req.nextUrl.searchParams.get("size");
   const s = SIZE[size ?? "sm"] ?? SIZE.sm;

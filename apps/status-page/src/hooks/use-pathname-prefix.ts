@@ -24,14 +24,15 @@ export function usePathnamePrefix() {
       setPrefix(
         resolvePathnamePrefix({
           hostname: window.location.hostname,
-          pathname: window.location.pathname,
+          slug: domain,
           customDomain: page?.customDomain,
           locale,
           defaultLocale,
+          isSelfHost: process.env.NEXT_PUBLIC_SELF_HOST === "true",
         }),
       );
     }
-  }, [page?.customDomain, locale, defaultLocale]);
+  }, [domain, page?.customDomain, locale, defaultLocale]);
 
   return prefix;
 }

@@ -39,6 +39,11 @@ const withNextIntl = createNextIntlPlugin({
 const nextConfig: NextConfig = {
   output: process.env.SELF_HOST === "true" ? "standalone" : undefined,
   basePath: process.env.STATUS_PAGE_BASE_PATH || undefined,
+  // Expose the self-host flag to client components (e.g. usePathnamePrefix) so
+  // path-based nav links keep the page slug. Undefined on hosted builds.
+  env: {
+    NEXT_PUBLIC_SELF_HOST: process.env.SELF_HOST,
+  },
   experimental: {
     authInterrupts: true,
   },
