@@ -75,12 +75,13 @@ common_env = {
     "STATUS_PAGE_BASE_URL": f"{PUBLIC_URL}/status",
     "STATUS_PAGE_BASE_PATH": "/status",
     # Honest probe-origin label: the single checker runs in one US Modal
-    # datacenter, NOT Amsterdam. "sea" (Seattle) is the FLY_REGIONS enum id
-    # closest to Modal's us-west compute. Persisted monitor.regions rows are
-    # migrated to match (see deploy/migrate step) so get-monitor-status region
-    # filtering still resolves.
-    "FLY_REGION": "sea",
-    "SELF_HOST_REGION": "sea",
+    # datacenter, NOT Amsterdam. "sjc" (San Jose) is a NON-DEPRECATED FLY_REGIONS
+    # id nearest Modal's us-west compute. NOTE: "sea" is deprecated in
+    # packages/regions, and sendCheckerTasks SKIPS deprecated regions — using it
+    # silently stops the cron from ever dispatching this monitor. Persisted
+    # monitor.regions rows are migrated to match so region filtering resolves.
+    "FLY_REGION": "sjc",
+    "SELF_HOST_REGION": "sjc",
     "SQLD_NODE": "primary",
     "SQLD_DB_PATH": "/var/lib/sqld/data",
     "SQLD_HTTP_LISTEN_ADDR": "127.0.0.1:8080",
