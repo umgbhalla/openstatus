@@ -14,8 +14,13 @@ import modal
 # (from_dockerfile build context). In-container it is never dereferenced.
 ROOT = Path(__file__).parents[2] if modal.is_local() else Path("/opt/openstatus")
 APP_NAME = "openstatus"
+# The deployed @app.server URL. Default MUST be the real one — a bare
+# `modal deploy` (no OPENSTATUS_PUBLIC_URL exported) previously fell back to a
+# wrong ...modal.run guess, so the cron dispatched to a 404 and ALL monitoring
+# silently stopped. The correct shape is <ws>--<app>-<class>.<routing>.modal.direct.
 PUBLIC_URL = os.environ.get(
-    "OPENSTATUS_PUBLIC_URL", "https://umgbhalla--openstatus-gateway.modal.run"
+    "OPENSTATUS_PUBLIC_URL",
+    "https://umgbhalla--openstatus-gateway.us-east.modal.direct",
 ).rstrip("/")
 # Region policy: a single hard pin (us-west-2) left Modal unable to place the
 # container ("waiting to be scheduled on a CPU worker ... Relaxing requirements
