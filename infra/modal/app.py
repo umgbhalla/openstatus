@@ -188,8 +188,13 @@ def bootstrap() -> dict[str, str]:
     volumes=volumes,
     secrets=[secret],
     env=common_env,
-    cpu=4,
-    memory=8192,
+    # Measured live: whole supervisord stack (2x next-server + 3x deno + sqld +
+    # go bins + nginx + tb-shim) peaks ~1.9GiB RSS. The old 4cpu/8.8GiB
+    # reservation was ~4.6x over-provisioned — the direct cause of both the
+    # ~$15.60/day cost AND the "waiting for a CPU worker" scheduling stalls.
+    # 2cpu/4GiB = ~2.2x headroom, ~half the cost, schedules immediately.
+    cpu=2,
+    memory=4096,
     min_containers=1,
     max_containers=1,
     target_concurrency=100,
