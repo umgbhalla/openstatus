@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import socket
 import subprocess
@@ -16,7 +17,15 @@ APP_NAME = "openstatus"
 PUBLIC_URL = os.environ.get(
     "OPENSTATUS_PUBLIC_URL", "https://umgbhalla--openstatus-gateway.modal.run"
 ).rstrip("/")
-REGION = os.environ.get("OPENSTATUS_MODAL_REGION", "us-west-2")
+# Region policy: a single hard pin (us-west-2) left Modal unable to place the
+# container ("waiting to be scheduled on a CPU worker ... Relaxing requirements
+# may lead to faster scheduling"). Allow any US region so the scheduler always
+# finds capacity; the monitor's probe origin is labeled truthfully via
+# SELF_HOST_REGION (see common_env), not tied to this placement.
+REGION = os.environ.get("OPENSTATUS_MODAL_REGION", "")
+COMPUTE_REGION: list[str] | str = (
+    [r for r in REGION.split(",") if r] if REGION else ["us-east-1", "us-west-2"]
+)
 
 app = modal.App(APP_NAME)
 bootstrap_app = modal.App(f"{APP_NAME}-bootstrap")
@@ -65,8 +74,13 @@ common_env = {
     "SITE_URL": PUBLIC_URL,
     "STATUS_PAGE_BASE_URL": f"{PUBLIC_URL}/status",
     "STATUS_PAGE_BASE_PATH": "/status",
-    "FLY_REGION": "ams",
-    "SELF_HOST_REGION": "ams",
+    # Honest probe-origin label: the single checker runs in one US Modal
+    # datacenter, NOT Amsterdam. "sea" (Seattle) is the FLY_REGIONS enum id
+    # closest to Modal's us-west compute. Persisted monitor.regions rows are
+    # migrated to match (see deploy/migrate step) so get-monitor-status region
+    # filtering still resolves.
+    "FLY_REGION": "sea",
+    "SELF_HOST_REGION": "sea",
     "SQLD_NODE": "primary",
     "SQLD_DB_PATH": "/var/lib/sqld/data",
     "SQLD_HTTP_LISTEN_ADDR": "127.0.0.1:8080",
@@ -108,6 +122,38 @@ def stop_process(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=10)
 
 
+def checkpoint_libsql() -> None:
+    """Force a WAL checkpoint(TRUNCATE) so the on-disk main DB is self-consistent
+    (no writes stranded in -wal) before a Volume commit snapshots the files. Best
+    effort: sqld exposes SQL over its HTTP endpoint on :8080."""
+    body = json.dumps(
+        {"statements": ["PRAGMA wal_checkpoint(TRUNCATE)"]}
+    ).encode()
+    req = urllib.request.Request(
+        "http://127.0.0.1:8080/",
+        data=body,
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        resp.read()
+
+
+def _persist_loop(interval: float = 45.0) -> None:
+    """Bounded-RPO durability: checkpoint + explicitly commit the Volume on a
+    timer. Modal's server-side background commit cadence is opaque and its
+    snapshot is not coordinated with SQLite's WAL boundary, and @modal.exit only
+    fires on graceful shutdown — so on an ungraceful kill everything since the
+    last commit is lost and the snapshot may be torn. This loop makes the real
+    RPO ~= interval and each snapshot self-consistent (checkpoint first)."""
+    while True:
+        time.sleep(interval)
+        try:
+            checkpoint_libsql()
+            libsql_volume.commit()
+        except Exception as err:  # noqa: BLE001 — never let the loop die
+            print(f"[persist] checkpoint/commit failed: {err}")
+
+
 @bootstrap_app.function(
     image=image,
     volumes=volumes,
@@ -116,7 +162,7 @@ def stop_process(process: subprocess.Popen[bytes]) -> None:
     cpu=4,
     memory=8192,
     timeout=900,
-    region=REGION,
+    region=COMPUTE_REGION,
 )
 def bootstrap() -> dict[str, str]:
     sqld = subprocess.Popen(["/usr/local/bin/sqld"], cwd="/var/lib/sqld")
@@ -138,7 +184,7 @@ def bootstrap() -> dict[str, str]:
     image=image,
     port=8100,
     routing_region="us-east",
-    compute_region=REGION,
+    compute_region=COMPUTE_REGION,
     volumes=volumes,
     secrets=[secret],
     env=common_env,
@@ -162,9 +208,20 @@ class Gateway:
             ports.append(8083)
         for port in ports:
             wait_port(port, timeout=300)
+        # Bounded-RPO durability: periodic checkpoint+commit (daemon thread dies
+        # with the container). See _persist_loop.
+        import threading
+
+        threading.Thread(target=_persist_loop, daemon=True).start()
 
     @modal.exit()
     def stop(self) -> None:
+        # Checkpoint BEFORE stopping sqld + committing, so the final snapshot is
+        # a single self-consistent DB file (no live -wal).
+        try:
+            checkpoint_libsql()
+        except Exception as err:  # noqa: BLE001
+            print(f"[exit] checkpoint failed: {err}")
         stop_process(self.process)
         libsql_volume.commit()
         workflows_volume.commit()
@@ -178,7 +235,7 @@ class Gateway:
     cpu=2,
     memory=4096,
     timeout=600,
-    region=REGION,
+    region=COMPUTE_REGION,
 )
 def exec(command: str) -> str:
     """One-off maintenance against the durable libSQL volume (set-password,
