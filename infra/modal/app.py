@@ -264,13 +264,24 @@ def exec(command: str) -> str:
 
 
 def call_workflow(path: str) -> None:
-    request = urllib.request.Request(
-        f"{PUBLIC_URL}/internal/workflows{path}",
-        headers={"Authorization": os.environ["CRON_SECRET"]},
-    )
-    with urllib.request.urlopen(request, timeout=240) as response:
-        if response.status != 200:
-            raise RuntimeError(f"workflow returned {response.status}")
+    """Dispatch one cron period. Isolated per-call: a transient failure on one
+    period (e.g. hitting the Gateway mid-recycle) must NOT abort the remaining
+    periods in the tick — otherwise a single flaky call silently stops ALL
+    monitor dispatch. Retries once, then logs and returns."""
+    url = f"{PUBLIC_URL}/internal/workflows{path}"
+    for attempt in (1, 2):
+        try:
+            request = urllib.request.Request(
+                url, headers={"Authorization": os.environ["CRON_SECRET"]}
+            )
+            with urllib.request.urlopen(request, timeout=120) as response:
+                if response.status == 200:
+                    return
+                print(f"[cron] {path} -> HTTP {response.status}")
+        except Exception as err:  # noqa: BLE001
+            print(f"[cron] {path} attempt {attempt} failed: {err}")
+            if attempt == 1:
+                time.sleep(3)
 
 
 @app.function(
@@ -284,15 +295,17 @@ def call_workflow(path: str) -> None:
 )
 def scheduled_checks() -> None:
     minute = int(time.time() // 60)
-    # 30s periodicity: one dispatch per minute — sendCheckerTasks enqueues the
-    # +30s twin itself.
-    call_workflow("/cron/checker/30s")
-    call_workflow("/cron/checker/1m")
+    # Each period is dispatched independently (call_workflow swallows+retries),
+    # so a failure on one never blocks the others. Order 1m first — the common
+    # case — so the primary cadence is never starved by a rarer period failing.
+    periods = ["1m", "30s"]
     if minute % 5 == 0:
-        call_workflow("/cron/checker/5m")
+        periods.append("5m")
     if minute % 10 == 0:
-        call_workflow("/cron/checker/10m")
+        periods.append("10m")
     if minute % 30 == 0:
-        call_workflow("/cron/checker/30m")
+        periods.append("30m")
     if minute % 60 == 0:
-        call_workflow("/cron/checker/1h")
+        periods.append("1h")
+    for p in periods:
+        call_workflow(f"/cron/checker/{p}")
