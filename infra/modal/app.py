@@ -83,8 +83,15 @@ common_env = {
     # datacenter, NOT Amsterdam. "sjc" (San Jose) is a NON-DEPRECATED FLY_REGIONS
     # id nearest Modal's us-west compute. NOTE: "sea" is deprecated in
     # packages/regions, and sendCheckerTasks SKIPS deprecated regions — using it
-    # silently stops the cron from ever dispatching this monitor. Persisted
-    # monitor.regions rows are migrated to match so region filtering resolves.
+    # silently stops the cron from ever dispatching this monitor.
+    #
+    # In self-host there is exactly ONE checker location: the checker stamps every
+    # stored result with FLY_REGION regardless of the monitor's configured region,
+    # and region-keyed status/uptime resolution only matches when a monitor's
+    # stored region == FLY_REGION. So the sole correct invariant is "every monitor
+    # and every historical row uses SELF_HOST_REGION". bootstrap() enforces it
+    # idempotently on every deploy (see normalize_regions) — new monitors created
+    # with the UI's default free-regions get reconciled to SELF_HOST_REGION.
     "FLY_REGION": "sjc",
     "SELF_HOST_REGION": "sjc",
     "SQLD_NODE": "primary",
@@ -172,6 +179,7 @@ def _persist_loop(interval: float = 45.0) -> None:
 )
 def bootstrap() -> dict[str, str]:
     sqld = subprocess.Popen(["/usr/local/bin/sqld"], cwd="/var/lib/sqld")
+    normalized = "skipped"
     try:
         wait_port(8080)
         subprocess.run(
@@ -179,11 +187,43 @@ def bootstrap() -> dict[str, str]:
             cwd="/opt/openstatus/packages/db",
             check=True,
         )
+        normalized = normalize_regions()
     finally:
         stop_process(sqld)
     libsql_volume.commit()
     workflows_volume.commit()
-    return {"database": "migrated"}
+    return {"database": "migrated", "regions": normalized}
+
+
+def normalize_regions() -> str:
+    """Idempotently force every monitor + historical result onto SELF_HOST_REGION.
+    Self-host runs ONE checker that stamps FLY_REGION on all results, so region-keyed
+    status/uptime resolution only works when stored monitor/ping regions match it —
+    otherwise a genuinely-down monitor silently renders "active". Requires sqld on
+    :8080 (bootstrap's single-writer instance). Only touches rows that differ, so
+    it's a no-op once converged."""
+    region = os.environ["SELF_HOST_REGION"]
+    stmts = [
+        f"UPDATE monitor SET regions = '{region}' WHERE regions <> '{region}'",
+        f"UPDATE monitor_status SET region = '{region}' WHERE region <> '{region}'",
+        # tb_ping is the self-host durable ping store (the Tinybird-protocol shim);
+        # its region drives the uptime/latency dashboard pipes.
+        f"UPDATE tb_ping SET region = '{region}' WHERE region <> '{region}'",
+    ]
+    changed = 0
+    for stmt in stmts:
+        try:
+            req = urllib.request.Request(
+                "http://127.0.0.1:8080/",
+                data=json.dumps({"statements": [stmt]}).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                body = json.loads(resp.read().decode())
+                changed += int(body[0].get("results", {}).get("rows_written", 0))
+        except Exception as err:  # noqa: BLE001 — a missing table pre-first-migrate is fine
+            print(f"[bootstrap] normalize_regions: {stmt[:40]}... -> {err}")
+    return f"region={region} rows_written={changed}"
 
 
 @app.server(
@@ -273,13 +313,17 @@ def call_workflow(path: str) -> None:
     period (e.g. hitting the Gateway mid-recycle) must NOT abort the remaining
     periods in the tick — otherwise a single flaky call silently stops ALL
     monitor dispatch. Retries once, then logs and returns."""
+    # 25s per attempt: dispatch is a fast trigger (the Gateway enqueues and returns
+    # sub-second normally), so a slow call means the Gateway is hung — bail quickly
+    # rather than burn the tick's 300s budget. Worst case per period ~= 25+3+25 = 53s;
+    # with the scheduled_checks deadline guard, later periods still get a turn.
     url = f"{PUBLIC_URL}/internal/workflows{path}"
     for attempt in (1, 2):
         try:
             request = urllib.request.Request(
                 url, headers={"Authorization": os.environ["CRON_SECRET"]}
             )
-            with urllib.request.urlopen(request, timeout=120) as response:
+            with urllib.request.urlopen(request, timeout=25) as response:
                 if response.status == 200:
                     return
                 print(f"[cron] {path} -> HTTP {response.status}")
@@ -312,5 +356,14 @@ def scheduled_checks() -> None:
         periods.append("30m")
     if minute % 60 == 0:
         periods.append("1h")
+    # Hard-bound the tick to the 300s function timeout: if the Gateway is hung and
+    # earlier periods burned most of the budget, stop launching new ones rather than
+    # get SIGKILLed mid-call (which would leave the volume without a clean exit).
+    # 1m/30s run first, so the primary cadence is always attempted; only the rarer
+    # long periods are shed under sustained slowness, and the next tick retries them.
+    deadline = time.time() + 250
     for p in periods:
+        if time.time() >= deadline:
+            print(f"[cron] tick budget exhausted; skipping remaining periods: {periods[periods.index(p):]}")
+            break
         call_workflow(f"/cron/checker/{p}")

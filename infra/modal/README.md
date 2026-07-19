@@ -110,9 +110,14 @@ The script errors clearly if no user with that email exists (it never creates a
 user or workspace). Passwords must be at least 8 characters. Re-running it resets
 the password for that user.
 
-Region: single self-host checker region is `ams` (`FLY_REGION`/`SELF_HOST_REGION`).
-Create monitors with region `ams` only — other regions trigger fly-replay
-semantics that have no proxy here.
+Region: single self-host checker region is `sjc` (`FLY_REGION`/`SELF_HOST_REGION`) —
+a non-deprecated FLY_REGIONS id near Modal's us-west compute (`sea` is deprecated and
+`sendCheckerTasks` silently skips deprecated regions). Create monitors with region
+`sjc` only — other regions trigger fly-replay semantics that have no proxy here, and
+region-keyed status/uptime resolution only matches the region the checker stamps
+(`FLY_REGION`). `bootstrap()` reconciles any monitor/ping rows to `SELF_HOST_REGION`
+on every deploy, so a monitor created with the UI's default free-regions is healed
+on the next deploy — but prefer creating it as `sjc` up front.
 
 ## Harp monitor
 
