@@ -38,6 +38,7 @@ image = modal.Image.from_dockerfile(
     ROOT / "Dockerfile.modal",
     context_dir=ROOT,
     add_python="3.13",
+    force_build=os.environ.get("OPENSTATUS_FORCE_BUILD") == "1",
 ).entrypoint([])
 
 libsql_volume = modal.Volume.from_name(
@@ -60,6 +61,12 @@ common_env = {
     "NODE_ENV": "production",
     "SELF_HOST": "true",
     "AUTH_TRUST_HOST": "true",
+    # next-auth v5 needs an explicit canonical URL for redirect + cookie/URL
+    # construction; without it, the standalone Next server infers its internal
+    # bind (0.0.0.0:3002) and login redirects to an unreachable host. Pin both
+    # (AUTH_URL is v5, NEXTAUTH_URL the v4 fallback some code paths still read).
+    "AUTH_URL": PUBLIC_URL,
+    "NEXTAUTH_URL": PUBLIC_URL,
     "DATABASE_URL": "http://127.0.0.1:8080",
     "DATABASE_AUTH_TOKEN": "",
     "DB_URL": "http://127.0.0.1:8080",
@@ -259,6 +266,16 @@ def normalize_regions() -> str:
 class Gateway:
     @modal.enter()
     def start(self) -> None:
+        # Substitute the real public host into the nginx conf BEFORE nginx starts.
+        # Modal's edge forwards Host as an internal IP, so nginx must pin the public
+        # host (Server Actions + next-auth abort on an Origin/X-Forwarded-Host
+        # mismatch). Derived from OPENSTATUS_PUBLIC_URL so the same image works on any
+        # workspace (umgbhalla, zonko, ...) — a hardwired host breaks login elsewhere.
+        host = (os.environ.get("OPENSTATUS_PUBLIC_URL") or PUBLIC_URL).split("://", 1)[
+            -1
+        ].split("/", 1)[0]
+        conf = Path("/etc/nginx/conf.d/openstatus.conf")
+        conf.write_text(conf.read_text().replace("__PUBLIC_HOST__", host))
         self.process = subprocess.Popen(
             ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
         )
