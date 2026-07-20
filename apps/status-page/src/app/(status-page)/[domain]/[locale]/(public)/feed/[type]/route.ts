@@ -116,7 +116,9 @@ export async function GET(
       });
     }
 
-    feed.items.sort((a, b) => a.date.getTime() - b.date.getTime());
+    // Newest-first: feed readers show items in array order; ascending put the
+    // oldest report at the top of the RSS/atom output.
+    feed.items.sort((a, b) => b.date.getTime() - a.date.getTime());
 
     const res = type === "atom" ? feed.atom1() : feed.rss2();
 

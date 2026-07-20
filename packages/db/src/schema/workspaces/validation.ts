@@ -70,14 +70,21 @@ export const selectWorkspaceSchema = createSelectSchema(workspace)
     return {
       ...val,
       plan: effectivePlan,
-      limits: limitsSchema.parse({
-        ...allPlans[effectivePlan].limits,
-        /**
-         * override the default plan limits
-         * allows us to set custom limits for a workspace
-         */
-        ...val.limits,
-      }),
+      limits: limitsSchema.parse(
+        process.env.SELF_HOST === "true"
+          ? // Self-host: the scale tier is absolute. Do NOT let stored per-workspace
+            // limits (e.g. a "free" row a migrated cloud DB carried in from a Stripe
+            // cancel webhook) override it DOWNWARD and silently re-lock features.
+            allPlans.scale.limits
+          : {
+              ...allPlans[effectivePlan].limits,
+              /**
+               * override the default plan limits
+               * allows us to set custom limits for a workspace
+               */
+              ...val.limits,
+            },
+      ),
     };
   });
 

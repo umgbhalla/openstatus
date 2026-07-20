@@ -10,4 +10,20 @@ const tb = new Tinybird({
   baseUrl: process.env.TINYBIRD_URL || undefined,
 });
 
-export const checkerAudit = new AuditLog({ tb });
+const _audit = new AuditLog({ tb });
+
+// An audit-log write must NEVER abort the status/notification path: publishAuditLog
+// is awaited un-wrapped at the incident/recover/degrade/fail sites in checker/index.ts,
+// so a transient Tinybird/shim failure there would swallow the alert (the exact job
+// of a monitor). Make it non-fatal — log and continue.
+export const checkerAudit = {
+  publishAuditLog: async (
+    ...args: Parameters<AuditLog["publishAuditLog"]>
+  ): Promise<void> => {
+    try {
+      await _audit.publishAuditLog(...args);
+    } catch (err) {
+      console.error("audit-log publish failed (non-fatal):", err);
+    }
+  },
+};

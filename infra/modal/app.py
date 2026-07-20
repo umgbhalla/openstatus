@@ -287,34 +287,12 @@ class Gateway:
         workflows_volume.commit()
 
 
-@bootstrap_app.function(
-    image=image,
-    volumes=volumes,
-    secrets=[secret],
-    env=common_env,
-    cpu=2,
-    memory=4096,
-    timeout=600,
-    region=COMPUTE_REGION,
-)
-def exec(command: str) -> str:
-    """One-off maintenance against the durable libSQL volume (set-password,
-    ad-hoc SQL). ``command`` is a shell string. Starts sqld, runs it, tears down."""
-    sqld = subprocess.Popen(["/usr/local/bin/sqld"], cwd="/var/lib/sqld")
-    try:
-        wait_port(8080)
-        result = subprocess.run(
-            ["/bin/sh", "-c", command],
-            capture_output=True,
-            text=True,
-            cwd="/opt/openstatus",
-        )
-    finally:
-        stop_process(sqld)
-    libsql_volume.commit()
-    out = f"rc={result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    print(out)
-    return out
+# NOTE: there is deliberately NO one-off `exec()` maintenance function here.
+# A second sqld started against the same libSQL Volume while the always-on Gateway
+# is up (it always is: min_containers=1) produces split-brain divergent commits and
+# a corrupted last-write-wins snapshot (confirmed HIGH by the self-host audit). Run
+# ad-hoc SQL / set-password via `modal container exec` INTO the live Gateway
+# container's running sqld instead (see infra/modal/README.md + deploy.sh).
 
 
 def call_workflow(path: str) -> None:
@@ -370,7 +348,10 @@ def scheduled_checks() -> None:
     # get SIGKILLed mid-call (which would leave the volume without a clean exit).
     # 1m/30s run first, so the primary cadence is always attempted; only the rarer
     # long periods are shed under sustained slowness, and the next tick retries them.
-    deadline = time.time() + 250
+    # 247, not 250: the guard only gates whether a call may START, and one
+    # call_workflow can run its full 25s+3s+25s=53s worst case. 300-53=247 keeps
+    # even a call started at the deadline inside the 300s function timeout.
+    deadline = time.time() + 247
     for p in periods:
         if time.time() >= deadline:
             print(f"[cron] tick budget exhausted; skipping remaining periods: {periods[periods.index(p):]}")

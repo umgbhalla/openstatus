@@ -302,20 +302,32 @@ function coerceCol(col: string, value: unknown): SqlArg {
   return null;
 }
 
-function parseBody(raw: string): Record<string, unknown>[] {
+function parseBody(raw: string): {
+  rows: Record<string, unknown>[];
+  malformed: number;
+} {
   const trimmed = raw.trim();
-  if (!trimmed) return [];
+  if (!trimmed) return { rows: [], malformed: 0 };
   // Accept a JSON array, a single JSON object, or NDJSON (one object per line).
   if (trimmed[0] === "[") {
     const arr = JSON.parse(trimmed);
-    return Array.isArray(arr) ? arr : [arr];
+    return { rows: Array.isArray(arr) ? arr : [arr], malformed: 0 };
   }
-  const out: Record<string, unknown>[] = [];
+  // NDJSON: one bad line must NOT discard the whole batch. Previously a single
+  // JSON.parse throw dropped every already-parsed row and the response still
+  // said 202 accepted -> silent data loss. Skip + count the bad lines instead.
+  const rows: Record<string, unknown>[] = [];
+  let malformed = 0;
   for (const line of trimmed.split("\n")) {
     const l = line.trim();
-    if (l) out.push(JSON.parse(l));
+    if (!l) continue;
+    try {
+      rows.push(JSON.parse(l));
+    } catch {
+      malformed++;
+    }
   }
-  return out;
+  return { rows, malformed };
 }
 
 async function insertRow(
@@ -341,31 +353,36 @@ async function insertRow(
 
 async function handleEvents(req: Request, name: string): Promise<Response> {
   const raw = await req.text();
-  let events: Record<string, unknown>[];
+  let parsed: { rows: Record<string, unknown>[]; malformed: number };
   try {
-    events = parseBody(raw);
+    parsed = parseBody(raw);
   } catch {
-    // Malformed body: quarantine rather than 500 so writers don't error-loop.
+    // Whole-body parse failure (e.g. a malformed JSON array): quarantine rather
+    // than 500 so writers don't error-loop.
     return json({ successful_rows: 0, quarantined_rows: 0 }, 202);
   }
 
   const spec = INGEST[name];
   if (!spec) {
     // Unknown datasource: accept + drop (Noop). Never break the writer.
-    return json({ successful_rows: events.length, quarantined_rows: 0 }, 202);
+    return json({ successful_rows: parsed.rows.length, quarantined_rows: 0 }, 202);
   }
 
   let ok = 0;
-  for (const event of events) {
+  // Report real ingest accounting: bad NDJSON lines + insert failures are
+  // quarantined (matches Tinybird's contract), intentional spec.drop filtering is not.
+  let quarantined = parsed.malformed;
+  for (const event of parsed.rows) {
     if (spec.drop?.(event)) continue;
     try {
       await insertRow(spec, event);
       ok++;
     } catch (err) {
       console.error(`insert into ${spec.table} failed:`, err);
+      quarantined++;
     }
   }
-  return json({ successful_rows: ok, quarantined_rows: 0 }, 202);
+  return json({ successful_rows: ok, quarantined_rows: quarantined }, 202);
 }
 
 // ---------------------------------------------------------------------------
