@@ -4,7 +4,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="$ROOT/infra/modal/.env.modal"
 MODAL_ENVIRONMENT="${MODAL_ENVIRONMENT:-main}"
-MODAL_CLIENT="${MODAL_CLIENT-$HOME/hub/modal-client/py}"
+# Default to the stock pip-installed client. The ~/hub/modal-client dev checkout
+# sends experimental protobuf fields (e.g. _experimental_fabric_size) the deployed
+# Modal server rejects — set MODAL_CLIENT explicitly only when testing that checkout.
+MODAL_CLIENT="${MODAL_CLIENT-}"
 MODAL_BIN="${MODAL_BIN:-$HOME/hub/harp/.venv/bin/modal}"
 if [[ "$MODAL_BIN" != */* ]]; then
   MODAL_BIN="$(command -v "$MODAL_BIN" || true)"
