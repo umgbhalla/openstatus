@@ -235,12 +235,21 @@ def normalize_regions() -> str:
     secrets=[secret],
     env=common_env,
     # Measured live: whole supervisord stack (2x next-server + 3x deno + sqld +
-    # go bins + nginx + tb-shim) peaks ~1.9GiB RSS. The old 4cpu/8.8GiB
-    # reservation was ~4.6x over-provisioned — the direct cause of both the
-    # ~$15.60/day cost AND the "waiting for a CPU worker" scheduling stalls.
-    # 2cpu/4GiB = ~2.2x headroom, ~half the cost, schedules immediately.
-    cpu=2,
-    memory=4096,
+    # go bins + nginx + tb-shim) peaks ~1.9GiB RSS. 1cpu/3GiB = ~1.5x headroom,
+    # the smallest safe always-on size (do NOT cut memory to the ~2GiB floor:
+    # per the snapshot-cost pincer, an OOM-kill bypasses @modal.exit and can drop
+    # the check write between 45s persist ticks). ~$1.7/day at standard rates,
+    # ~78% under the old 4cpu/8.8GiB ($15.60/day) reservation.
+    #
+    # Why NOT scale-to-zero + memory snapshot (the obvious "cheaper" move): the
+    # pincer proved it corrupts the uptime DB here. Snapshot captures the whole
+    # container (subprocs + sockets survive restore), but a snapshotted sqld holds
+    # a boot-era page cache while the Volume advances (last-write-wins) → restore
+    # serves stale pages, passes integrity_check, then commits over newer data and
+    # rewinds history. Snapshot is only safe on a STATELESS dashboard tier (future
+    # split), never on the sqld-owning container. Always-on + rightsized it is.
+    cpu=1,
+    memory=3072,
     min_containers=1,
     max_containers=1,
     target_concurrency=100,
