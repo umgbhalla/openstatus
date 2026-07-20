@@ -271,9 +271,16 @@ class Gateway:
         # host (Server Actions + next-auth abort on an Origin/X-Forwarded-Host
         # mismatch). Derived from OPENSTATUS_PUBLIC_URL so the same image works on any
         # workspace (umgbhalla, zonko, ...) — a hardwired host breaks login elsewhere.
-        host = (os.environ.get("OPENSTATUS_PUBLIC_URL") or PUBLIC_URL).split("://", 1)[
-            -1
-        ].split("/", 1)[0]
+        # Use NEXT_PUBLIC_URL: it is baked into common_env at deploy time (the
+        # deploy.sh URL-pin pass resolves it to THIS workspace's gateway URL).
+        # OPENSTATUS_PUBLIC_URL is only set in the deploy shell, NOT the container
+        # runtime, so reading it here would fall back to the hardwired umgbhalla
+        # default and mis-pin every non-umgbhalla deploy (breaks Server Actions/login).
+        host = (
+            (os.environ.get("NEXT_PUBLIC_URL") or PUBLIC_URL)
+            .split("://", 1)[-1]
+            .split("/", 1)[0]
+        )
         conf = Path("/etc/nginx/conf.d/openstatus.conf")
         conf.write_text(conf.read_text().replace("__PUBLIC_HOST__", host))
         self.process = subprocess.Popen(
