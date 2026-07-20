@@ -7,6 +7,7 @@ import {
   TooltipTrigger,
 } from "@openstatus/ui/components/ui/tooltip";
 import { useCopyToClipboard } from "@openstatus/ui/hooks/use-copy-to-clipboard";
+import { getBadgeUrl, getStatusPageUrl } from "@openstatus/utils";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import { useParams } from "next/navigation";
@@ -26,7 +27,10 @@ export function Sidebar() {
 
   if (!statusPage) return null;
 
-  const BADGE_URL = `https://${statusPage.slug}.openstatus.dev/badge/v2`;
+  const BADGE_URL = getBadgeUrl({
+    slug: statusPage.slug,
+    customDomain: statusPage.customDomain,
+  });
 
   return (
     <SidebarRight
@@ -39,10 +43,10 @@ export function Sidebar() {
               label: "Slug",
               value: (
                 <Link
-                  href={`https://${
-                    statusPage.customDomain ||
-                    `${statusPage.slug}.openstatus.dev`
-                  }`}
+                  href={getStatusPageUrl({
+                    slug: statusPage.slug,
+                    customDomain: statusPage.customDomain,
+                  })}
                   target="_blank"
                 >
                   {statusPage.slug}
@@ -137,9 +141,10 @@ export function Sidebar() {
         onClick: () =>
           typeof window !== "undefined" &&
           window.open(
-            `https://${
-              statusPage.customDomain || `${statusPage.slug}.openstatus.dev`
-            }`,
+            getStatusPageUrl({
+              slug: statusPage.slug,
+              customDomain: statusPage.customDomain,
+            }),
             "_blank",
           ),
         children: (

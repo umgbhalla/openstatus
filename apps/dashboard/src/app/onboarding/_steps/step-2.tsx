@@ -2,6 +2,7 @@
 
 import type { ThemeKey } from "@openstatus/theme-store";
 import { Button } from "@openstatus/ui/components/ui/button";
+import { getStatusPageUrl } from "@openstatus/utils";
 import { ArrowRight } from "lucide-react";
 import { useState } from "react";
 
@@ -78,8 +79,11 @@ export function Step2({
         </OnboardingStepHeader>
         {isLocked ? (
           <OnboardingLockedSummary
-            value={`${createdPageData?.slug}.openstatus.dev`}
-            href={`https://${createdPageData?.slug}.openstatus.dev`}
+            value={getStatusPageUrl({ slug: createdPageData?.slug }).replace(
+              /^https?:\/\//,
+              "",
+            )}
+            href={getStatusPageUrl({ slug: createdPageData?.slug })}
             helper="Theme, components, and visibility are editable later from page settings."
           />
         ) : (

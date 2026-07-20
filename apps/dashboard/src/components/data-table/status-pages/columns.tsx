@@ -1,6 +1,7 @@
 "use client";
 
 import type { RouterOutputs } from "@openstatus/api";
+import { getStatusPageUrl } from "@openstatus/utils";
 import type { ColumnDef } from "@tanstack/react-table";
 
 import { Link } from "@/components/common/link";
@@ -54,7 +55,10 @@ export const columns: ColumnDef<StatusPage>[] = [
       const slug = row.getValue("slug");
       return (
         <TableCellLink
-          href={domain ? `https://${domain}` : `https://${slug}.openstatus.dev`}
+          href={getStatusPageUrl({
+            slug: String(slug),
+            customDomain: domain ? String(domain) : undefined,
+          })}
           value={slug}
         />
       );

@@ -1,6 +1,7 @@
 "use client";
 
 import type { RouterOutputs } from "@openstatus/api";
+import { getStatusPageUrl } from "@openstatus/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Row } from "@tanstack/react-table";
 import { useRef } from "react";
@@ -30,9 +31,11 @@ export function StatusReportRowActions({ report }: { report: StatusReport }) {
     "view-report": () => {
       if (typeof window !== "undefined") {
         window.open(
-          `https://${
-            report.page.customDomain || `${report.page.slug}.openstatus.dev`
-          }/events/report/${report.id}`,
+          getStatusPageUrl({
+            slug: report.page.slug,
+            customDomain: report.page.customDomain,
+            path: `/events/report/${report.id}`,
+          }),
           "_blank",
         );
       }
