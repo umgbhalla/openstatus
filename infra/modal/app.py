@@ -39,7 +39,6 @@ image = modal.Image.from_dockerfile(
     context_dir=ROOT,
     add_python="3.13",
 ).entrypoint([])
-cron_image = modal.Image.debian_slim(python_version="3.13")
 
 libsql_volume = modal.Volume.from_name(
     "openstatus-libsql-v2", create_if_missing=True, version=2
@@ -273,6 +272,13 @@ class Gateway:
         import threading
 
         threading.Thread(target=_persist_loop, daemon=True).start()
+        # Check dispatch runs IN-CONTAINER (see _cron_loop), not as a Modal @app.function
+        # + modal.Cron. Reasons: (1) the Gateway is already always-on so a 60s thread is
+        # free; (2) it needs zero scheduled-function slots (a Modal plan cap — 5 on the
+        # zonko workspace, already full — that otherwise blocks deploy); (3) it dispatches
+        # to localhost:3000 directly, eliminating the external cron->gateway hop and the
+        # PUBLIC_URL-pin 404 class of bug.
+        threading.Thread(target=_cron_loop, daemon=True).start()
 
     @modal.exit()
     def stop(self) -> None:
@@ -296,21 +302,21 @@ class Gateway:
 
 
 def call_workflow(path: str) -> None:
-    """Dispatch one cron period. Isolated per-call: a transient failure on one
-    period (e.g. hitting the Gateway mid-recycle) must NOT abort the remaining
-    periods in the tick — otherwise a single flaky call silently stops ALL
-    monitor dispatch. Retries once, then logs and returns."""
-    # 25s per attempt: dispatch is a fast trigger (the Gateway enqueues and returns
-    # sub-second normally), so a slow call means the Gateway is hung — bail quickly
-    # rather than burn the tick's 300s budget. Worst case per period ~= 25+3+25 = 53s;
-    # with the scheduled_checks deadline guard, later periods still get a turn.
-    url = f"{PUBLIC_URL}/internal/workflows{path}"
+    """Dispatch one cron period to the in-container workflows service. Isolated
+    per-call: a transient failure on one period must NOT abort the rest of the
+    tick — a single flaky call must never silently stop ALL monitor dispatch.
+    Retries once, then logs and returns."""
+    # Direct to the workflows deno service on localhost (nginx :8100 rewrites
+    # /internal/workflows/(.*) -> /$1 on :3000; we skip the hop). No PUBLIC_URL,
+    # so no external-cron URL-pin 404 footgun. 15s is generous for a localhost
+    # trigger that normally returns sub-second.
+    url = f"http://127.0.0.1:3000{path}"
     for attempt in (1, 2):
         try:
             request = urllib.request.Request(
                 url, headers={"Authorization": os.environ["CRON_SECRET"]}
             )
-            with urllib.request.urlopen(request, timeout=25) as response:
+            with urllib.request.urlopen(request, timeout=15) as response:
                 if response.status == 200:
                     return
                 print(f"[cron] {path} -> HTTP {response.status}")
@@ -320,20 +326,9 @@ def call_workflow(path: str) -> None:
                 time.sleep(3)
 
 
-@app.function(
-    image=cron_image,
-    secrets=[secret],
-    # PUBLIC_URL is a module global re-evaluated in the cron container's own
-    # import — pin it so the container resolves the deployer's URL.
-    env={"OPENSTATUS_PUBLIC_URL": PUBLIC_URL},
-    schedule=modal.Cron("* * * * *"),
-    timeout=300,
-)
-def scheduled_checks() -> None:
-    minute = int(time.time() // 60)
-    # Each period is dispatched independently (call_workflow swallows+retries),
-    # so a failure on one never blocks the others. Order 1m first — the common
-    # case — so the primary cadence is never starved by a rarer period failing.
+def _dispatch_tick(minute: int) -> None:
+    """Dispatch all check periods due this minute. Order 1m first — the common
+    case — so the primary cadence is never starved by a rarer period failing."""
     periods = ["1m", "30s"]
     if minute % 5 == 0:
         periods.append("5m")
@@ -343,17 +338,27 @@ def scheduled_checks() -> None:
         periods.append("30m")
     if minute % 60 == 0:
         periods.append("1h")
-    # Hard-bound the tick to the 300s function timeout: if the Gateway is hung and
-    # earlier periods burned most of the budget, stop launching new ones rather than
-    # get SIGKILLed mid-call (which would leave the volume without a clean exit).
-    # 1m/30s run first, so the primary cadence is always attempted; only the rarer
-    # long periods are shed under sustained slowness, and the next tick retries them.
-    # 247, not 250: the guard only gates whether a call may START, and one
-    # call_workflow can run its full 25s+3s+25s=53s worst case. 300-53=247 keeps
-    # even a call started at the deadline inside the 300s function timeout.
-    deadline = time.time() + 247
+    # Bound the tick so it can't overlap the next minute's tick under a hung
+    # workflows service (1m/30s run first, so the primary cadence is always
+    # attempted; rarer long periods are shed and retried next tick).
+    deadline = time.time() + 50
     for p in periods:
         if time.time() >= deadline:
-            print(f"[cron] tick budget exhausted; skipping remaining periods: {periods[periods.index(p):]}")
+            print(f"[cron] tick budget exhausted; skipping: {periods[periods.index(p):]}")
             break
         call_workflow(f"/cron/checker/{p}")
+
+
+def _cron_loop() -> None:
+    """In-container per-minute scheduler (replaces a Modal @app.function +
+    modal.Cron). Runs as a daemon thread on the always-on Gateway. Sleeps to each
+    minute boundary, then dispatches the due periods. Dies with the container;
+    Gateway.start relaunches it on every (re)start, so a recycle only pauses
+    checks for the boot window — same as the old external cron."""
+    while True:
+        now = time.time()
+        time.sleep(max(1.0, 60.0 - (now % 60.0)))
+        try:
+            _dispatch_tick(int(time.time() // 60))
+        except Exception as err:  # noqa: BLE001
+            print(f"[cron] tick error: {err}")
