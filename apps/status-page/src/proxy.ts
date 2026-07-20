@@ -9,7 +9,7 @@ import { applyPageLocaleOverride } from "./lib/proxy/apply-page-locale-override"
 import { composePageAction } from "./lib/proxy/compose-page-action";
 import { detectMarkdown } from "./lib/proxy/detect-markdown";
 import { sanitizeRedirectParam } from "./lib/proxy/sanitize-redirect-param";
-import { withBasePath } from "./lib/proxy/with-base-path";
+import { stripBasePath, withBasePath } from "./lib/proxy/with-base-path";
 import { resolveRoute } from "./lib/resolve-route";
 
 const isSelfHosted = process.env.SELF_HOST === "true";
@@ -23,11 +23,19 @@ export default auth(async (req) => {
   const host = req.headers.get("x-forwarded-host");
 
   // Strip a `.md` suffix before route resolution so path-based markdown
-  // (`/foo/en/monitors/123.md`) parses slug/locale correctly.
+  // (`/foo/en/monitors/123.md`) parses slug/locale correctly. Also strip the
+  // basePath explicitly — Next's own stripping in middleware is nondeterministic
+  // behind the reverse proxy, and an unstripped basePath makes the slug resolve
+  // to the basePath segment ("status") → page-not-found → 404.
   const { wantsMarkdown, source, pathname } = detectMarkdown({
-    pathname: url.pathname,
+    pathname: stripBasePath(url.pathname),
     accept: req.headers.get("accept"),
   });
+  // Normalize url.pathname to the basePath-stripped path so EVERY downstream
+  // consumer (composePageAction's pathDiffers check, etc.) sees the same value
+  // resolveRoute used. Otherwise resolveRoute (stripped) and composePageAction
+  // (unstripped url.pathname) disagree → a permanent rewrite → redirect loop → hang.
+  url.pathname = pathname;
 
   const initialRoute = resolveRoute({
     host,

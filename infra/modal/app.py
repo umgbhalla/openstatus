@@ -28,8 +28,11 @@ PUBLIC_URL = os.environ.get(
 # finds capacity; the monitor's probe origin is labeled truthfully via
 # SELF_HOST_REGION (see common_env), not tied to this placement.
 REGION = os.environ.get("OPENSTATUS_MODAL_REGION", "")
+# BROAD region GROUPS (us-east/us-west), not narrow AWS regions (us-east-1/us-west-2):
+# the narrow pins starved the scheduler ("waiting to be scheduled on a CPU worker")
+# and left the Gateway 502ing during recycles. Groups span every US worker pool.
 COMPUTE_REGION: list[str] | str = (
-    [r for r in REGION.split(",") if r] if REGION else ["us-east-1", "us-west-2"]
+    [r for r in REGION.split(",") if r] if REGION else ["us-east", "us-west"]
 )
 
 app = modal.App(APP_NAME)

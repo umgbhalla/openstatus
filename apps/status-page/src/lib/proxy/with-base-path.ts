@@ -50,3 +50,24 @@ export function applyBasePath(url: URL): URL {
   url.pathname = withBasePath(url.pathname);
   return url;
 }
+
+/**
+ * Remove the configured basePath prefix from a pathname, if present.
+ *
+ * Next is SUPPOSED to strip basePath from `req.nextUrl.pathname` in middleware,
+ * but this is version/build-nondeterministic behind a reverse proxy (observed:
+ * one deploy sees `/harp`, an identically-built one sees `/status/harp`). Route
+ * resolution keys on the FIRST path segment being the page slug, so an unstripped
+ * basePath makes the slug resolve to the basePath itself ("status") → page not
+ * found → 404. Strip it explicitly so resolution is deterministic; a no-op when
+ * Next already stripped it (path doesn't start with the basePath).
+ */
+export function stripBasePath(pathname: string): string {
+  const basePath = getBasePath();
+  if (!basePath) return pathname;
+  if (pathname === basePath) return "/";
+  if (pathname.startsWith(`${basePath}/`)) {
+    return pathname.slice(basePath.length) || "/";
+  }
+  return pathname;
+}
